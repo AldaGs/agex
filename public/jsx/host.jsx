@@ -174,6 +174,159 @@ function getSelectedContext() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// XMP persistence
+// ---------------------------------------------------------------------------
+// Workbench state is serialized as a JSON string and stored in the .aep's
+// XMP packet under a custom namespace. AE writes the packet to disk on
+// project save; until then the data lives in memory only.
+//
+// Namespace URI: http://custom.ag.agex/   Prefix: agex   Property: workbench
+// ---------------------------------------------------------------------------
+
+var AGEX_NS = "http://custom.ag.agex/";
+var AGEX_PREFIX = "agex";
+var AGEX_PROP = "workbench";
+var __agexXMPReady = false;
+
+// AppData log path: %AppData%/Roaming/AG-Extensions/agex/log/current-state.json
+function getAgexLogFile() {
+    var base = Folder.userData.fsName + "/AG-Extensions/agex/log";
+    var folder = new Folder(base);
+    if (!folder.exists) folder.create();
+    return new File(base + "/current-state.json");
+}
+
+function writeAgexLog(jsonString) {
+    try {
+        var f = getAgexLogFile();
+        f.encoding = "UTF-8";
+        f.open("w");
+        f.write(jsonString);
+        f.close();
+        return true;
+    } catch (e) { return false; }
+}
+
+function clearStateLog() {
+    try {
+        var f = getAgexLogFile();
+        if (f.exists) f.remove();
+        return '{"success": true}';
+    } catch (e) {
+        var safe = e.toString().replace(/"/g, "'");
+        return '{"success": false, "message": "' + safe + '"}';
+    }
+}
+
+function getProjectFingerprint() {
+    try {
+        var proj = app.project;
+        if (!proj) {
+            return '{"success": true, "open": false}';
+        }
+        var fsName = "";
+        var modifiedTime = 0;
+        if (proj.file) {
+            fsName = proj.file.fsName.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+            try {
+                modifiedTime = proj.file.modified ? proj.file.modified.getTime() : 0;
+            } catch (e) { modifiedTime = 0; }
+        }
+        var dirty = (proj.dirty === true) ? 'true' : 'false';
+        return '{"success": true, "open": true, "fsName": "' + fsName + '", "dirty": ' + dirty + ', "modifiedTime": ' + modifiedTime + '}';
+    } catch (e) {
+        var safe = e.toString().replace(/"/g, "'");
+        return '{"success": false, "message": "' + safe + '"}';
+    }
+}
+
+function ensureXMP() {
+    if (__agexXMPReady) return true;
+    try {
+        if (typeof ExternalObject.AdobeXMPScript === "undefined"
+            || ExternalObject.AdobeXMPScript === null) {
+            ExternalObject.AdobeXMPScript = new ExternalObject("lib:AdobeXMPScript");
+        }
+        XMPMeta.registerNamespace(AGEX_NS, AGEX_PREFIX);
+        __agexXMPReady = true;
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+function escapeForJSON(s) {
+    return s
+        .replace(/\\/g, "\\\\")
+        .replace(/"/g, '\\"')
+        .replace(/\n/g, "\\n")
+        .replace(/\r/g, "\\r")
+        .replace(/\t/g, "\\t");
+}
+
+function saveWorkbenchState(payloadString) {
+    try {
+        if (!ensureXMP()) {
+            return '{"success": false, "message": "Could not load AdobeXMPScript."}';
+        }
+        var proj = app.project;
+        if (!proj) {
+            return '{"success": false, "message": "No project open."}';
+        }
+
+        var payload = eval("(" + payloadString + ")");
+        var jsonString = (typeof payload === "string") ? payload : payload.json;
+        if (typeof jsonString !== "string") {
+            return '{"success": false, "message": "Expected { json: string } payload."}';
+        }
+
+        var xmp = new XMPMeta(proj.xmpPacket || "");
+        xmp.setProperty(AGEX_NS, AGEX_PROP, jsonString);
+        proj.xmpPacket = xmp.serialize();
+
+        // Best-effort mirror to AppData log for crash recovery. Don't fail
+        // the XMP write if disk logging hiccups.
+        writeAgexLog(jsonString);
+
+        return '{"success": true, "message": "Workbench state saved to XMP."}';
+
+    } catch (e) {
+        var safe = e.toString().replace(/"/g, "'");
+        return '{"success": false, "message": "' + safe + '"}';
+    }
+}
+
+function loadWorkbenchState() {
+    try {
+        if (!ensureXMP()) {
+            return '{"success": false, "message": "Could not load AdobeXMPScript."}';
+        }
+        var proj = app.project;
+        if (!proj) {
+            return '{"success": false, "message": "No project open."}';
+        }
+
+        var xmp = new XMPMeta(proj.xmpPacket || "");
+        if (!xmp.doesPropertyExist(AGEX_NS, AGEX_PROP)) {
+            return '{"success": true, "found": false, "data": ""}';
+        }
+
+        var propObj = xmp.getProperty(AGEX_NS, AGEX_PROP);
+        // XMPProperty wraps the string in .value; defend against both shapes.
+        var value = "";
+        if (propObj) {
+            value = (typeof propObj.value === "string") ? propObj.value : String(propObj);
+        }
+
+        return '{"success": true, "found": true, "data": "' + escapeForJSON(value) + '"}';
+
+    } catch (e) {
+        var safe = e.toString().replace(/"/g, "'");
+        return '{"success": false, "message": "' + safe + '"}';
+    }
+}
+
 function getActiveCompContext() {
     try {
         var proj = app.project;

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { evalScript } from './cep-bridge';
 import Editor, { loader } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor';
@@ -16,6 +16,14 @@ function deriveStatusLevel(status) {
   return 'ok';
 }
 
+function fmtSavedAt(epochMs) {
+  if (!epochMs) return 'Unsaved project';
+  const d = new Date(epochMs);
+  const h = String(d.getHours()).padStart(2, '0');
+  const m = String(d.getMinutes()).padStart(2, '0');
+  return `Saved ${h}:${m}`;
+}
+
 function App() {
   const [activeComp, setActiveComp] = useState({ id: null, name: "No Comp Selected" });
   const [workbench, setWorkbench] = useState({});
@@ -27,9 +35,17 @@ function App() {
   const [isLayersModalOpen, setIsLayersModalOpen] = useState(false);
   const [workbenchOpen, setWorkbenchOpen] = useState(true);
 
+  // Persistence state
+  const [projectFsName, setProjectFsName] = useState(null);
+  const [lastSavedTime, setLastSavedTime] = useState(0); // epoch ms, on-disk mtime
+  const [lastSavedSnapshot, setLastSavedSnapshot] = useState('{}');
+  const bootedRef = useRef(false); // guards autosave until first rehydrate completes
+
   const activeBindings = workbench[activeComp.id] || [];
   const activeBindingData = activeBindings.find(b => b.id === selectedBindingId);
   const statusLevel = useMemo(() => deriveStatusLevel(status), [status]);
+  const workbenchSnapshot = useMemo(() => JSON.stringify(workbench), [workbench]);
+  const isDirty = bootedRef.current && workbenchSnapshot !== lastSavedSnapshot;
 
   const fetchActiveComp = async (silent = false) => {
     try {
@@ -53,11 +69,79 @@ function App() {
     }
   };
 
+  const fetchProjectFingerprint = async () => {
+    try {
+      const fp = await evalScript('getProjectFingerprint');
+      if (!fp.success || !fp.open) {
+        if (projectFsName !== null) {
+          setProjectFsName(null);
+          setLastSavedTime(0);
+          setLastSavedSnapshot('{}');
+          setWorkbench({});
+          bootedRef.current = false;
+        }
+        return;
+      }
+      if (fp.fsName !== projectFsName) {
+        setProjectFsName(fp.fsName);
+        bootedRef.current = false;
+        try { await evalScript('clearStateLog'); } catch (_) {}
+        try {
+          const res = await evalScript('loadWorkbenchState');
+          if (res.success && res.found && res.data) {
+            try {
+              const parsed = JSON.parse(res.data);
+              setWorkbench(parsed);
+              setLastSavedSnapshot(JSON.stringify(parsed));
+            } catch (_) {
+              setWorkbench({});
+              setLastSavedSnapshot('{}');
+            }
+          } else {
+            setWorkbench({});
+            setLastSavedSnapshot('{}');
+          }
+        } finally {
+          bootedRef.current = true;
+        }
+      }
+      setLastSavedTime(fp.modifiedTime || 0);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   useEffect(() => {
+    fetchProjectFingerprint();
     fetchActiveComp(false);
-    const intervalId = setInterval(() => fetchActiveComp(true), 1000);
+    const intervalId = setInterval(() => {
+      fetchProjectFingerprint();
+      fetchActiveComp(true);
+    }, 1000);
     return () => clearInterval(intervalId);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectFsName]);
+
+  // Debounced autosave: any workbench mutation triggers a 500ms-debounced
+  // saveWorkbenchState. Skipped until first rehydrate completes so we don't
+  // blow away XMP data with an empty {} on boot.
+  useEffect(() => {
+    if (!bootedRef.current) return;
+    if (workbenchSnapshot === lastSavedSnapshot) return;
+    const id = setTimeout(async () => {
+      try {
+        const res = await evalScript('saveWorkbenchState', { json: workbenchSnapshot });
+        if (res.success) {
+          setLastSavedSnapshot(workbenchSnapshot);
+        } else {
+          setStatus(`Error saving: ${res.message}`);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }, 500);
+    return () => clearTimeout(id);
+  }, [workbenchSnapshot, lastSavedSnapshot]);
 
   const handleAddToWorkbench = async () => {
     setStatus("Checking selection...");
@@ -177,7 +261,13 @@ function App() {
 
       <header className="topbar">
         <div className="comp-info">
-          <span className="comp-label">Active Comp</span>
+          <span className="comp-label">
+            Active Comp
+            <span className="save-info" title={projectFsName || ''}>
+              · {fmtSavedAt(lastSavedTime)}
+              {isDirty && <span className="dirty-dot" title="Modified — autosaving to XMP" />}
+            </span>
+          </span>
           <span className={`comp-name ${activeComp.id ? '' : 'empty'}`}>{activeComp.name}</span>
         </div>
         <div className={`status-pill ${statusLevel}`} title={status}>{status}</div>

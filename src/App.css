@@ -74,6 +74,30 @@ html, body, #root {
   font-weight: 600;
 }
 
+.save-info {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-muted);
+  font-weight: 400;
+  margin-left: 4px;
+}
+
+.dirty-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warn);
+  margin-left: 5px;
+  vertical-align: middle;
+  animation: dirty-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes dirty-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
 .comp-name {
   font-size: 13px;
   font-weight: 600;
