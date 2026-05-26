@@ -252,30 +252,55 @@ function App() {
       const injectResponse = await evalScript('smartInject', payload);
 
       if (injectResponse.success) {
-        let finalPropName = "Custom Property";
-        let finalPropDisplay = "Custom Property";
-
-        if (injectResponse.properties && injectResponse.properties.length > 0) {
-          finalPropName = injectResponse.properties[0].matchName;
-          finalPropDisplay = injectResponse.properties[0].displayName;
+        // Group successful injections by matchName so a selection that spans
+        // multiple property types (Position + Rotation on the same layer)
+        // creates one binding per property — none get orphaned.
+        const pairs = injectResponse.pairs || [];
+        const groups = new Map();
+        for (const p of pairs) {
+          if (!groups.has(p.matchName)) {
+            groups.set(p.matchName, {
+              matchName: p.matchName,
+              displayName: p.displayName,
+              layers: [],
+            });
+          }
+          const g = groups.get(p.matchName);
+          if (!g.layers.some((l) => l.id === p.layerId)) {
+            g.layers.push({ id: p.layerId, name: p.layerName });
+          }
         }
 
-        setStatus(`${injectResponse.message} Target: ${finalPropDisplay}`);
-
-        if (activeComp.id) {
-          const newBindingId = Date.now().toString();
-          setWorkbench(prev => {
-            const currentCompList = prev[activeComp.id] || [];
-            const newBinding = {
-              id: newBindingId,
-              expression: expression,
-              matchName: finalPropName,
-              displayName: finalPropDisplay,
-              layers: injectResponse.layers
-            };
-            return { ...prev, [activeComp.id]: [...currentCompList, newBinding] };
+        // Fallback for any host version that doesn't emit `pairs` yet:
+        // collapse into a single binding using the flat properties/layers.
+        if (groups.size === 0 && injectResponse.properties?.length > 0) {
+          groups.set(injectResponse.properties[0].matchName, {
+            matchName: injectResponse.properties[0].matchName,
+            displayName: injectResponse.properties[0].displayName,
+            layers: injectResponse.layers || [],
           });
-          enqueueAutoName([newBindingId]);
+        }
+
+        if (activeComp.id && groups.size > 0) {
+          const stamp = Date.now();
+          const additions = Array.from(groups.values()).map((g, idx) => ({
+            id: `${stamp}-${idx}`,
+            expression,
+            matchName: g.matchName,
+            displayName: g.displayName,
+            layers: g.layers,
+          }));
+          setWorkbench((prev) => {
+            const currentCompList = prev[activeComp.id] || [];
+            return { ...prev, [activeComp.id]: [...currentCompList, ...additions] };
+          });
+          enqueueAutoName(additions.map((b) => b.id));
+          const summary = additions.length === 1
+            ? `Added binding for ${additions[0].displayName}.`
+            : `Added ${additions.length} bindings (${additions.map((a) => a.displayName).join(', ')}).`;
+          setStatus(summary);
+        } else {
+          setStatus(injectResponse.message);
         }
       } else {
         setStatus(`Error: ${injectResponse.message}`);

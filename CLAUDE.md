@@ -135,3 +135,7 @@ Scanning a comp imports existing expressions into Workbench bindings. When ≥2 
 - XMP packet size ceiling under heavy use (10k+ bindings) — unknown, probably never hit
 - Fuzzy match algorithm choice (Levenshtein vs. AST normalization) — defer to Phase A.3 refinement
 - Whether to ship a "starter pack" of ~50 built-in snippets or start sparse
+
+## Maybe-someday (deliberately off the roadmap)
+
+- **Active LLM agent (inline ghost-text completions, Copilot-style).** Monaco supports `registerInlineCompletionsProvider`; the existing provider layer could add a `complete(prefix, context)` method. Blocker is UX, not architecture: latency on local 7B models is borderline (1–3s/req), and cancellation/debouncing have to be tight. Opt-in only, Ollama-only at first, would be the safe approach. Recorded as "probably" — revisit if a user explicitly asks.

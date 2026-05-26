@@ -347,12 +347,18 @@ export default function Library({ open, onClose, onInsert }) {
                             <pre className="lib-code">{effectiveBody}</pre>
                             <div className="lib-actions">
                               {isBuiltin ? (
-                                <button className="btn-secondary" onClick={() => beginFork(s)}>
+                                <button
+                                  className="btn-secondary"
+                                  onClick={() => beginFork({ ...s, body: effectiveBody })}
+                                >
                                   Fork & Edit
                                 </button>
                               ) : (
                                 <>
-                                  <button className="btn-secondary" onClick={() => beginEdit(s)}>
+                                  <button
+                                    className="btn-secondary"
+                                    onClick={() => beginEdit({ ...s, body: effectiveBody })}
+                                  >
                                     Edit
                                   </button>
                                   <button

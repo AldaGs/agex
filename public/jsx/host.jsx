@@ -20,13 +20,15 @@ function smartInject(payloadString) {
 
         app.beginUndoGroup("agex: Smart Inject");
 
+        var resultPairs = []; // exact (layer, matchName) tuples for accurate per-property grouping
+
         if (selectedProps.length > 0) {
             var uniqueProps = {};
             var uniqueLayers = {};
 
             for (var i = 0; i < selectedProps.length; i++) {
                 var prop = selectedProps[i];
-                
+
                 if (prop.canSetExpression) {
                     prop.expression = expr;
                     successCount++;
@@ -42,6 +44,16 @@ function smartInject(payloadString) {
                         uniqueLayers[layer.id] = true;
                         var safeLayerName = layer.name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
                         resultLayers.push('{"id": ' + layer.id + ', "name": "' + safeLayerName + '"}');
+                    }
+                    if (layer) {
+                        var safeLayerName3 = layer.name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+                        var safePropName3 = prop.name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+                        resultPairs.push(
+                            '{"layerId":' + layer.id +
+                            ',"layerName":"' + safeLayerName3 +
+                            '","matchName":"' + prop.matchName +
+                            '","displayName":"' + safePropName3 + '"}'
+                        );
                     }
                 }
             }
@@ -81,7 +93,8 @@ function smartInject(payloadString) {
         var jsonString = '{"success": true, ';
         jsonString += '"message": "Injected into ' + successCount + ' properties.", ';
         jsonString += '"layers": [' + resultLayers.join(',') + '], ';
-        jsonString += '"properties": [' + resultProperties.join(',') + ']';
+        jsonString += '"properties": [' + resultProperties.join(',') + '], ';
+        jsonString += '"pairs": [' + resultPairs.join(',') + ']';
         jsonString += '}';
 
         return jsonString;
