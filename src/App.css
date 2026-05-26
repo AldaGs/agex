@@ -270,6 +270,26 @@ html, body, #root {
 
 .workbench.collapsed { max-height: 36px; }
 
+.workbench-header-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 10px;
+}
+
+.workbench-header-row .workbench-header { flex: 1; }
+
+.scan-btn {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+}
+
+.scan-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .workbench-header {
   display: flex;
   align-items: center;
@@ -455,6 +475,75 @@ html, body, #root {
   border-radius: var(--radius-sm);
   padding: 4px 0;
 }
+
+.scan-actions {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.link-action {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.link-action:hover { color: #74c0fc; }
+
+.scan-list { padding: 0; }
+
+.scan-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--bg-2);
+  cursor: pointer;
+}
+
+.scan-row:last-child { border-bottom: none; }
+.scan-row:hover { background: rgba(255, 255, 255, 0.03); }
+
+.scan-row.existing {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.scan-row input[type="checkbox"] {
+  margin-top: 3px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+
+.scan-row-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.scan-row-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 3px;
+}
+
+.badge-existing {
+  background: var(--bg-3);
+  color: var(--text-muted);
+}
+
+.modal-footer {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+  justify-content: flex-end;
+}
+
+.modal-footer .btn-primary { flex: 0 1 auto; padding: 8px 16px; }
 
 .layer-item {
   display: flex;

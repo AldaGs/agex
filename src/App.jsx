@@ -35,6 +35,10 @@ function App() {
   const [isLayersModalOpen, setIsLayersModalOpen] = useState(false);
   const [workbenchOpen, setWorkbenchOpen] = useState(true);
 
+  // Scan modal state
+  const [scanGroups, setScanGroups] = useState(null); // null = closed; array = open
+  const [scanSelected, setScanSelected] = useState({}); // groupKey -> bool
+
   // Persistence state
   const [projectFsName, setProjectFsName] = useState(null);
   const [lastSavedTime, setLastSavedTime] = useState(0); // epoch ms, on-disk mtime
@@ -250,6 +254,84 @@ function App() {
     }
   };
 
+  // --- Scan composition for existing expressions ---
+  const handleScanComp = async () => {
+    if (!activeComp.id) {
+      setStatus("Error: no active composition to scan.");
+      return;
+    }
+    setStatus("Scanning composition...");
+    try {
+      const res = await evalScript('scanCompositionExpressions');
+      if (!res.success) {
+        setStatus(`Error: ${res.message}`);
+        return;
+      }
+      // Group by (matchName, expression). Mark existing-in-workbench.
+      const groupMap = new Map();
+      for (const r of res.results) {
+        const key = `${r.matchName}::${r.expression}`;
+        if (!groupMap.has(key)) {
+          groupMap.set(key, {
+            key,
+            matchName: r.matchName,
+            displayName: r.displayName,
+            expression: r.expression,
+            layers: [],
+          });
+        }
+        const g = groupMap.get(key);
+        if (!g.layers.some(l => l.id === r.layerId)) {
+          g.layers.push({ id: r.layerId, name: r.layerName });
+        }
+      }
+      const groups = Array.from(groupMap.values()).map(g => ({
+        ...g,
+        existing: activeBindings.some(b =>
+          b.matchName === g.matchName && b.expression === g.expression
+        ),
+      }));
+
+      if (groups.length === 0) {
+        setStatus("Scan complete: no expressions found in this composition.");
+        return;
+      }
+
+      // Pre-select all non-existing groups
+      const initialSelection = {};
+      groups.forEach(g => { initialSelection[g.key] = !g.existing; });
+      setScanSelected(initialSelection);
+      setScanGroups(groups);
+      setStatus(`Found ${groups.length} expression group${groups.length === 1 ? '' : 's'}.`);
+    } catch (e) {
+      console.error(e);
+      setStatus("Error scanning composition.");
+    }
+  };
+
+  const handleScanImport = () => {
+    if (!scanGroups || !activeComp.id) return;
+    const toImport = scanGroups.filter(g => scanSelected[g.key] && !g.existing);
+    if (toImport.length === 0) {
+      setScanGroups(null);
+      return;
+    }
+    setWorkbench(prev => {
+      const current = prev[activeComp.id] || [];
+      const additions = toImport.map((g, idx) => ({
+        id: `${Date.now()}-${idx}`,
+        expression: g.expression,
+        matchName: g.matchName,
+        displayName: g.displayName,
+        layers: g.layers,
+      }));
+      return { ...prev, [activeComp.id]: [...current, ...additions] };
+    });
+    setStatus(`Imported ${toImport.length} binding${toImport.length === 1 ? '' : 's'}.`);
+    setScanGroups(null);
+    setScanSelected({});
+  };
+
   const handleCancelEdit = () => {
     setSelectedBindingId(null);
     setExpression("");
@@ -335,15 +417,25 @@ function App() {
       </div>
 
       <section className={`workbench ${workbenchOpen ? 'open' : 'collapsed'}`}>
-        <button
-          className="workbench-header"
-          onClick={() => setWorkbenchOpen(o => !o)}
-          aria-expanded={workbenchOpen}
-        >
-          <span className="chevron">▾</span>
-          <span>Workbench</span>
-          <span className="count-badge">{activeBindings.length}</span>
-        </button>
+        <div className="workbench-header-row">
+          <button
+            className="workbench-header"
+            onClick={() => setWorkbenchOpen(o => !o)}
+            aria-expanded={workbenchOpen}
+          >
+            <span className="chevron">▾</span>
+            <span>Workbench</span>
+            <span className="count-badge">{activeBindings.length}</span>
+          </button>
+          <button
+            className="pill-btn scan-btn"
+            onClick={handleScanComp}
+            disabled={!activeComp.id}
+            title="Scan the active comp for existing expressions"
+          >
+            ⟳ Scan
+          </button>
+        </div>
 
         {workbenchOpen && (
           <div className="binding-list">
@@ -367,6 +459,55 @@ function App() {
           </div>
         )}
       </section>
+
+      {scanGroups && (
+        <div className="modal-backdrop" onClick={() => setScanGroups(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">Scan results</h2>
+              <button className="icon-btn" onClick={() => setScanGroups(null)} aria-label="Close">×</button>
+            </div>
+            <div className="modal-sub">
+              Found <strong>{scanGroups.length}</strong> expression group{scanGroups.length === 1 ? '' : 's'}
+              {' '}across <strong>{scanGroups.reduce((n, g) => n + g.layers.length, 0)}</strong> propert
+              {scanGroups.reduce((n, g) => n + g.layers.length, 0) === 1 ? 'y' : 'ies'}.
+            </div>
+            <div className="scan-actions">
+              <button className="link-action" onClick={() => {
+                const all = {}; scanGroups.forEach(g => { all[g.key] = !g.existing; });
+                setScanSelected(all);
+              }}>Select new</button>
+              <button className="link-action" onClick={() => setScanSelected({})}>Select none</button>
+            </div>
+            <div className="layer-list scan-list">
+              {scanGroups.map(g => (
+                <label key={g.key} className={`scan-row ${g.existing ? 'existing' : ''}`}>
+                  <input
+                    type="checkbox"
+                    checked={!!scanSelected[g.key]}
+                    disabled={g.existing}
+                    onChange={(e) => setScanSelected(prev => ({ ...prev, [g.key]: e.target.checked }))}
+                  />
+                  <div className="scan-row-body">
+                    <div className="scan-row-head">
+                      <span className="prop-name">{g.displayName}</span>
+                      <span className="layer-count">{g.layers.length}L</span>
+                      {g.existing && <span className="badge badge-existing">In WB</span>}
+                    </div>
+                    <div className="expr-preview">{g.expression}</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setScanGroups(null)}>Cancel</button>
+              <button className="btn-primary" onClick={handleScanImport}>
+                Import {Object.values(scanSelected).filter(Boolean).length} selected
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isLayersModalOpen && activeBindingData && (
         <div className="modal-backdrop" onClick={() => setIsLayersModalOpen(false)}>

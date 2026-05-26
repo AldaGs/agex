@@ -327,6 +327,60 @@ function loadWorkbenchState() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Composition scan: walk the active comp and report every property that has
+// a non-empty expression. React groups the results by (matchName, expression)
+// for import into the Workbench.
+// ---------------------------------------------------------------------------
+
+function _agexWalkProps(propertyGroup, layer, out) {
+    if (!propertyGroup.numProperties) return;
+    for (var i = 1; i <= propertyGroup.numProperties; i++) {
+        var prop = propertyGroup.property(i);
+        if (prop.propertyType === PropertyType.NAMED_GROUP
+            || prop.propertyType === PropertyType.INDEXED_GROUP) {
+            _agexWalkProps(prop, layer, out);
+        } else if (prop.canSetExpression && prop.expression && prop.expression.length > 0) {
+            out.push({
+                layerId: layer.id,
+                layerName: layer.name,
+                matchName: prop.matchName,
+                displayName: prop.name,
+                expression: prop.expression
+            });
+        }
+    }
+}
+
+function scanCompositionExpressions() {
+    try {
+        var proj = app.project;
+        if (!proj || !proj.activeItem || !(proj.activeItem instanceof CompItem)) {
+            return '{"success": false, "message": "No active composition."}';
+        }
+        var comp = proj.activeItem;
+        var results = [];
+        for (var i = 1; i <= comp.numLayers; i++) {
+            _agexWalkProps(comp.layer(i), comp.layer(i), results);
+        }
+        var parts = [];
+        for (var j = 0; j < results.length; j++) {
+            var r = results[j];
+            parts.push(
+                '{"layerId":' + r.layerId +
+                ',"layerName":"' + escapeForJSON(r.layerName) +
+                '","matchName":"' + r.matchName +
+                '","displayName":"' + escapeForJSON(r.displayName) +
+                '","expression":"' + escapeForJSON(r.expression) + '"}'
+            );
+        }
+        return '{"success":true,"compId":' + comp.id + ',"results":[' + parts.join(',') + ']}';
+    } catch (e) {
+        var safe = e.toString().replace(/"/g, "'");
+        return '{"success": false, "message": "' + safe + '"}';
+    }
+}
+
 function getActiveCompContext() {
     try {
         var proj = app.project;
