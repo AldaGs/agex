@@ -860,18 +860,21 @@ html, body, #root {
 }
 
 .lib-code {
-  background: var(--bg-2);
+  background: #1e1e1e;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 8px 10px;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 1.35;
   color: #d4d4d4;
   margin: 0 0 8px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 180px;
-  overflow-y: auto;
+  text-align: left;
+  white-space: pre;
+  tab-size: 2;
+  -moz-tab-size: 2;
+  max-height: 220px;
+  overflow: auto;
 }
 
 .lib-actions {
