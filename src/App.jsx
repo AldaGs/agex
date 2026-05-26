@@ -7,6 +7,7 @@ import Library from './Library';
 import Settings from './Settings';
 import LLMDialog from './LLMDialog';
 import { getActiveProvider, getLLMConfig } from './llm';
+import { Bot } from 'lucide-react';
 import './App.css';
 
 loader.config({ monaco });
@@ -669,6 +670,48 @@ function App() {
     }
   };
 
+  // --- Remove a binding entirely (clears AE expressions + drops the card) ---
+  const handleRemoveBinding = async (binding, e) => {
+    if (e) e.stopPropagation();
+    const ok = window.confirm(
+      `Remove "${binding.label || binding.displayName}" from the Workbench?\n\n` +
+      `This will also clear the expression on ${binding.layers.length} layer${binding.layers.length === 1 ? '' : 's'} in After Effects.`
+    );
+    if (!ok) return;
+    setStatus("Removing binding…");
+    try {
+      const res = await evalScript('clearExpression', {
+        matchName: binding.matchName,
+        layerIds: binding.layers.map(l => l.id),
+      });
+      if (!res.success) {
+        setStatus(`Error: ${res.message}`);
+        return;
+      }
+      setWorkbench(prev => {
+        const current = prev[activeComp.id] || [];
+        return { ...prev, [activeComp.id]: current.filter(b => b.id !== binding.id) };
+      });
+      // If the removed binding was the selected one, exit edit mode
+      if (selectedBindingId === binding.id) {
+        setSelectedBindingId(null);
+        setExpression("");
+      }
+      // Drop from multi-select if present
+      if (multiSelect.has(binding.id)) {
+        setMultiSelect(prev => {
+          const next = new Set(prev);
+          next.delete(binding.id);
+          return next;
+        });
+      }
+      setStatus(`Removed binding (${res.cleared || 0} layer${res.cleared === 1 ? '' : 's'} cleared).`);
+    } catch (err) {
+      console.error(err);
+      setStatus("Error removing binding.");
+    }
+  };
+
   const handleCancelEdit = () => {
     setSelectedBindingId(null);
     setExpression("");
@@ -725,9 +768,10 @@ function App() {
             <button
               className="pill-btn ai-btn"
               onClick={() => setLlmOpen(true)}
-              title="Ask the configured LLM to write or modify the expression"
+              title="Ask the configured agent to write or modify the expression"
             >
-              Ask AI
+              <Bot size={12} className="ai-btn-icon" />
+              Ask Agent
             </button>
             <button
               className="pill-btn library-btn"
@@ -832,6 +876,14 @@ function App() {
                       onClick={(e) => handleSelectBinding(binding, e)}
                       title={binding.expression || '(empty)'}
                     >
+                      <button
+                        className="binding-remove"
+                        onClick={(e) => handleRemoveBinding(binding, e)}
+                        title="Remove binding and clear its AE expression"
+                        aria-label="Remove binding"
+                      >
+                        ×
+                      </button>
                       <div className="row">
                         {isMulti && <span className="multi-check">✓</span>}
                         {bindingHasError(binding) && (
