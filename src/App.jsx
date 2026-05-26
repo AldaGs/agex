@@ -428,6 +428,97 @@ function App() {
     setScanSelected({});
   };
 
+  // --- Add/remove layers on the active binding (A5) ---
+  const handleAddSelectedLayersToBinding = async () => {
+    if (!activeBindingData) return;
+    setStatus("Adding selected layers…");
+    try {
+      const peek = await evalScript('peekSelection');
+      if (!peek.success) {
+        setStatus(`Error: ${peek.message}`);
+        return;
+      }
+      // Filter out layers already in the binding
+      const existingIds = new Set(activeBindingData.layers.map(l => l.id));
+      const newLayers = peek.layers.filter(l => !existingIds.has(l.id));
+      if (newLayers.length === 0) {
+        setStatus("All selected layers are already in this binding.");
+        return;
+      }
+      // Inject the binding's expression onto the new layers using its matchName
+      const res = await evalScript('smartInject', {
+        expression: activeBindingData.expression,
+        targetProperty: activeBindingData.matchName,
+        layerIds: newLayers.map(l => l.id),
+      });
+      if (!res.success) {
+        setStatus(`Error: ${res.message}`);
+        return;
+      }
+      const injectedLayers = res.layers && res.layers.length ? res.layers : newLayers;
+      setWorkbench(prev => {
+        const current = prev[activeComp.id] || [];
+        return {
+          ...prev,
+          [activeComp.id]: current.map(b => {
+            if (b.id !== activeBindingData.id) return b;
+            const seen = new Set(b.layers.map(l => l.id));
+            const merged = [...b.layers];
+            injectedLayers.forEach(l => {
+              if (!seen.has(l.id)) { seen.add(l.id); merged.push(l); }
+            });
+            return { ...b, layers: merged };
+          }),
+        };
+      });
+      setStatus(`Added ${injectedLayers.length} layer${injectedLayers.length === 1 ? '' : 's'}.`);
+    } catch (e) {
+      console.error(e);
+      setStatus("Error adding layers.");
+    }
+  };
+
+  const handleRemoveLayerFromBinding = async (layerId) => {
+    if (!activeBindingData) return;
+    setStatus("Removing layer…");
+    try {
+      const res = await evalScript('clearExpression', {
+        matchName: activeBindingData.matchName,
+        layerIds: [layerId],
+      });
+      if (!res.success) {
+        setStatus(`Error: ${res.message}`);
+        return;
+      }
+      setWorkbench(prev => {
+        const current = prev[activeComp.id] || [];
+        return {
+          ...prev,
+          [activeComp.id]: current
+            .map(b => {
+              if (b.id !== activeBindingData.id) return b;
+              return { ...b, layers: b.layers.filter(l => l.id !== layerId) };
+            })
+            // Drop bindings that have no layers left
+            .filter(b => b.layers.length > 0),
+        };
+      });
+      // If the binding was emptied, close the modal and exit edit mode
+      const remaining = activeBindingData.layers.length - 1;
+      if (remaining === 0) {
+        setIsLayersModalOpen(false);
+        setSelectedBindingId(null);
+        setExpression("");
+        setStatus("Binding emptied and removed.");
+      } else {
+        setStatus(`Removed layer. ${remaining} remaining.`);
+      }
+    } catch (e) {
+      console.error(e);
+      setStatus("Error removing layer.");
+    }
+  };
+
   const handleCancelEdit = () => {
     setSelectedBindingId(null);
     setExpression("");
@@ -696,11 +787,24 @@ function App() {
             <div className="modal-sub">
               Property: <strong>{activeBindingData.displayName}</strong>
             </div>
+            <div className="scan-actions">
+              <button className="link-action" onClick={handleAddSelectedLayersToBinding}>
+                + Add from timeline selection
+              </button>
+            </div>
             <div className="layer-list">
               {activeBindingData.layers.map((layer, idx) => (
                 <div key={idx} className="layer-item">
                   <span className="layer-id">#{layer.id}</span>
-                  <span>{layer.name}</span>
+                  <span style={{ flex: 1 }}>{layer.name}</span>
+                  <button
+                    className="icon-btn layer-remove"
+                    onClick={() => handleRemoveLayerFromBinding(layer.id)}
+                    title="Remove this layer and clear its expression"
+                    aria-label={`Remove ${layer.name}`}
+                  >
+                    ×
+                  </button>
                 </div>
               ))}
             </div>

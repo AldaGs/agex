@@ -352,6 +352,39 @@ function _agexWalkProps(propertyGroup, layer, out) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Clear an expression on specific (layerId, matchName) pairs. Used when a
+// user removes a layer from a Workbench binding.
+// ---------------------------------------------------------------------------
+function clearExpression(payloadString) {
+    try {
+        var payload = eval("(" + payloadString + ")");
+        var layerIds = payload.layerIds || [];
+        var matchName = payload.matchName;
+        if (!matchName) {
+            return '{"success": false, "message": "matchName required."}';
+        }
+
+        var cleared = 0;
+        app.beginUndoGroup("agex: Clear Expression");
+        for (var i = 0; i < layerIds.length; i++) {
+            var layer = app.project.layerByID(layerIds[i]);
+            if (!layer) continue;
+            var prop = findPropertyByMatchName(layer, matchName);
+            if (prop && prop.canSetExpression) {
+                prop.expression = "";
+                cleared++;
+            }
+        }
+        app.endUndoGroup();
+
+        return '{"success": true, "cleared": ' + cleared + '}';
+    } catch (e) {
+        var safe = e.toString().replace(/"/g, "'");
+        return '{"success": false, "message": "' + safe + '"}';
+    }
+}
+
 function scanCompositionExpressions() {
     try {
         var proj = app.project;
