@@ -658,15 +658,46 @@ html, body, #root {
 .modal-footer .btn-primary { flex: 0 1 auto; padding: 8px 16px; }
 
 .layer-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  display: block;
   padding: 7px 12px;
   font-size: 12px;
   border-bottom: 1px solid var(--bg-2);
 }
 
 .layer-item:last-child { border-bottom: none; }
+
+.error-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--danger);
+  flex-shrink: 0;
+  box-shadow: 0 0 6px rgba(220, 53, 69, 0.7);
+}
+
+.layer-item-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.layer-item.has-error {
+  background: rgba(220, 53, 69, 0.08);
+}
+
+.layer-error {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: #ff8787;
+  margin-top: 3px;
+  margin-left: 32px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .layer-remove {
   font-size: 16px;

@@ -43,6 +43,9 @@ function App() {
   const [multiSelect, setMultiSelect] = useState(() => new Set()); // binding IDs
   const [mergeOpen, setMergeOpen] = useState(false);
 
+  // Expression-error map: `${layerId}:${matchName}` -> error string
+  const [errorMap, setErrorMap] = useState({});
+
   // Persistence state
   const [projectFsName, setProjectFsName] = useState(null);
   const [lastSavedTime, setLastSavedTime] = useState(0); // epoch ms, on-disk mtime
@@ -337,6 +340,50 @@ function App() {
       setStatus("Error during merge.");
     }
   };
+
+  // Probe list for the error poll. Stable serialization so the effect doesn't
+  // re-run on every render.
+  const probesKey = useMemo(() => {
+    return activeBindings
+      .flatMap(b => b.layers.map(l => `${l.id}:${b.matchName}`))
+      .sort()
+      .join(',');
+  }, [activeBindings]);
+
+  // Poll AE for expressionError on every (layer, property) we track.
+  useEffect(() => {
+    if (!probesKey) {
+      setErrorMap({});
+      return;
+    }
+    let cancelled = false;
+    const tick = async () => {
+      const probes = activeBindings.flatMap(b =>
+        b.layers.map(l => ({ layerId: l.id, matchName: b.matchName }))
+      );
+      if (probes.length === 0) return;
+      try {
+        const res = await evalScript('checkExpressionErrors', { probes });
+        if (cancelled || !res.success) return;
+        const map = {};
+        for (const r of res.results) {
+          if (r.error) map[`${r.layerId}:${r.matchName}`] = r.error;
+        }
+        setErrorMap(map);
+      } catch (e) {
+        // Silent — error polling shouldn't disrupt the UI.
+      }
+    };
+    tick();
+    const id = setInterval(tick, 2000);
+    return () => { cancelled = true; clearInterval(id); };
+    // probesKey is the stable identity; activeBindings is captured by tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [probesKey]);
+
+  // Helper: does any layer in this binding have an error?
+  const bindingHasError = (b) =>
+    b.layers.some(l => errorMap[`${l.id}:${b.matchName}`]);
 
   // ESC clears multi-select / closes merge dialog
   useEffect(() => {
@@ -660,6 +707,9 @@ function App() {
                     >
                       <div className="row">
                         {isMulti && <span className="multi-check">✓</span>}
+                        {bindingHasError(binding) && (
+                          <span className="error-dot" title="One or more layers report an AE expression error" />
+                        )}
                         <span className="prop-name">{binding.displayName}</span>
                         <span className="layer-count">{binding.layers.length}L</span>
                       </div>
@@ -793,20 +843,28 @@ function App() {
               </button>
             </div>
             <div className="layer-list">
-              {activeBindingData.layers.map((layer, idx) => (
-                <div key={idx} className="layer-item">
-                  <span className="layer-id">#{layer.id}</span>
-                  <span style={{ flex: 1 }}>{layer.name}</span>
-                  <button
-                    className="icon-btn layer-remove"
-                    onClick={() => handleRemoveLayerFromBinding(layer.id)}
-                    title="Remove this layer and clear its expression"
-                    aria-label={`Remove ${layer.name}`}
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
+              {activeBindingData.layers.map((layer, idx) => {
+                const err = errorMap[`${layer.id}:${activeBindingData.matchName}`];
+                return (
+                  <div key={idx} className={`layer-item ${err ? 'has-error' : ''}`}>
+                    <div className="layer-item-row">
+                      <span className="layer-id">#{layer.id}</span>
+                      <span style={{ flex: 1 }}>{layer.name}</span>
+                      <button
+                        className="icon-btn layer-remove"
+                        onClick={() => handleRemoveLayerFromBinding(layer.id)}
+                        title="Remove this layer and clear its expression"
+                        aria-label={`Remove ${layer.name}`}
+                      >
+                        ×
+                      </button>
+                    </div>
+                    {err && (
+                      <div className="layer-error" title={err}>{err}</div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

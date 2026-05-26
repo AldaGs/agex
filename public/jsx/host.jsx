@@ -356,6 +356,39 @@ function _agexWalkProps(propertyGroup, layer, out) {
 // Clear an expression on specific (layerId, matchName) pairs. Used when a
 // user removes a layer from a Workbench binding.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Check expression errors. Caller passes a list of probes; we return a parallel
+// list of error strings (empty when the property has no error). Light enough
+// to poll on the 1s tick.
+// ---------------------------------------------------------------------------
+function checkExpressionErrors(payloadString) {
+    try {
+        var payload = eval("(" + payloadString + ")");
+        var probes = payload.probes || [];
+        var entries = [];
+        for (var i = 0; i < probes.length; i++) {
+            var p = probes[i];
+            var layer = app.project.layerByID(p.layerId);
+            var err = "";
+            if (layer) {
+                var prop = findPropertyByMatchName(layer, p.matchName);
+                if (prop && prop.expressionError && prop.expressionError.length > 0) {
+                    err = prop.expressionError;
+                }
+            }
+            entries.push(
+                '{"layerId":' + p.layerId +
+                ',"matchName":"' + p.matchName +
+                '","error":"' + escapeForJSON(err) + '"}'
+            );
+        }
+        return '{"success":true,"results":[' + entries.join(',') + ']}';
+    } catch (e) {
+        var safe = e.toString().replace(/"/g, "'");
+        return '{"success": false, "message": "' + safe + '"}';
+    }
+}
+
 function clearExpression(payloadString) {
     try {
         var payload = eval("(" + payloadString + ")");
