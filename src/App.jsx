@@ -39,6 +39,10 @@ function App() {
   const [scanGroups, setScanGroups] = useState(null); // null = closed; array = open
   const [scanSelected, setScanSelected] = useState({}); // groupKey -> bool
 
+  // Multi-select merge state
+  const [multiSelect, setMultiSelect] = useState(() => new Set()); // binding IDs
+  const [mergeOpen, setMergeOpen] = useState(false);
+
   // Persistence state
   const [projectFsName, setProjectFsName] = useState(null);
   const [lastSavedTime, setLastSavedTime] = useState(0); // epoch ms, on-disk mtime
@@ -242,7 +246,19 @@ function App() {
     }
   };
 
-  const handleSelectBinding = (binding) => {
+  const handleSelectBinding = (binding, e) => {
+    // Ctrl/Cmd+click → toggle multi-select for merging
+    if (e && (e.ctrlKey || e.metaKey)) {
+      setMultiSelect(prev => {
+        const next = new Set(prev);
+        if (next.has(binding.id)) next.delete(binding.id);
+        else next.add(binding.id);
+        return next;
+      });
+      return;
+    }
+    // Plain click — clear any multi-select, then toggle edit mode
+    if (multiSelect.size > 0) setMultiSelect(new Set());
     if (selectedBindingId === binding.id) {
       setSelectedBindingId(null);
       setExpression("");
@@ -253,6 +269,86 @@ function App() {
       setStatus(`Loaded binding: ${binding.displayName}`);
     }
   };
+
+  // --- Merge selected bindings (A4) ---
+  const selectedForMerge = useMemo(
+    () => activeBindings.filter(b => multiSelect.has(b.id)),
+    [activeBindings, multiSelect]
+  );
+
+  const mergeMatchNameConflict = useMemo(() => {
+    const set = new Set(selectedForMerge.map(b => b.matchName));
+    return set.size > 1;
+  }, [selectedForMerge]);
+
+  const handleMerge = async (mode) => {
+    if (selectedForMerge.length < 2) return;
+    if (mergeMatchNameConflict) {
+      setStatus("Error: cannot merge bindings with different target properties.");
+      return;
+    }
+    const matchName = selectedForMerge[0].matchName;
+    const displayName = selectedForMerge[0].displayName;
+
+    // mode: 'fuzzy' = first selected wins; 'defaults' = library defaults
+    // (Phase B will wire library lookup; for now both paths fall back to
+    // first-selected so the UX is in place.)
+    const canonicalExpression = selectedForMerge[0].expression;
+
+    // Deduplicated union of layers
+    const allLayers = [];
+    const seen = new Set();
+    selectedForMerge.forEach(b => {
+      b.layers.forEach(l => {
+        if (!seen.has(l.id)) { seen.add(l.id); allLayers.push(l); }
+      });
+    });
+
+    setStatus(`Merging ${selectedForMerge.length} bindings…`);
+    try {
+      const res = await evalScript('smartInject', {
+        expression: canonicalExpression,
+        targetProperty: matchName,
+        layerIds: allLayers.map(l => l.id),
+      });
+      if (!res.success) {
+        setStatus(`Error during merge: ${res.message}`);
+        return;
+      }
+      setWorkbench(prev => {
+        const current = prev[activeComp.id] || [];
+        const kept = current.filter(b => !multiSelect.has(b.id));
+        const merged = {
+          id: `${Date.now()}-merge`,
+          expression: canonicalExpression,
+          matchName,
+          displayName,
+          layers: res.layers && res.layers.length ? res.layers : allLayers,
+        };
+        return { ...prev, [activeComp.id]: [...kept, merged] };
+      });
+      setStatus(`Merged ${selectedForMerge.length} bindings → ${displayName} (${allLayers.length} layers).`);
+      setMultiSelect(new Set());
+      setMergeOpen(false);
+      setSelectedBindingId(null);
+      setExpression("");
+    } catch (e) {
+      console.error(e);
+      setStatus("Error during merge.");
+    }
+  };
+
+  // ESC clears multi-select / closes merge dialog
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        if (mergeOpen) setMergeOpen(false);
+        else if (multiSelect.size > 0) setMultiSelect(new Set());
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mergeOpen, multiSelect]);
 
   // --- Scan composition for existing expressions ---
   const handleScanComp = async () => {
@@ -438,25 +534,51 @@ function App() {
         </div>
 
         {workbenchOpen && (
-          <div className="binding-list">
-            {activeBindings.length === 0 ? (
-              <div className="empty-state">No bindings in this composition.</div>
-            ) : (
-              activeBindings.map(binding => (
-                <div
-                  key={binding.id}
-                  className={`binding-card ${selectedBindingId === binding.id ? 'selected' : ''}`}
-                  onClick={() => handleSelectBinding(binding)}
-                >
-                  <div className="row">
-                    <span className="prop-name">{binding.displayName}</span>
-                    <span className="layer-count">{binding.layers.length}L</span>
-                  </div>
-                  <div className="expr-preview">{binding.expression || <em>(empty)</em>}</div>
-                </div>
-              ))
+          <>
+            {multiSelect.size > 0 && (
+              <div className="merge-bar">
+                <span className="merge-bar-count">{multiSelect.size} selected</span>
+                {multiSelect.size === 1 && (
+                  <span className="merge-bar-hint">Ctrl+click another to merge</span>
+                )}
+                {multiSelect.size >= 2 && (
+                  <button className="btn-primary merge-btn" onClick={() => setMergeOpen(true)}>
+                    Merge {multiSelect.size}
+                  </button>
+                )}
+                <button className="link-action" onClick={() => setMultiSelect(new Set())}>Clear</button>
+              </div>
             )}
-          </div>
+            <div className="binding-list">
+              {activeBindings.length === 0 ? (
+                <div className="empty-state">No bindings in this composition.</div>
+              ) : (
+                activeBindings.map(binding => {
+                  const isMulti = multiSelect.has(binding.id);
+                  const classes = [
+                    'binding-card',
+                    selectedBindingId === binding.id ? 'selected' : '',
+                    isMulti ? 'multi-selected' : '',
+                  ].filter(Boolean).join(' ');
+                  return (
+                    <div
+                      key={binding.id}
+                      className={classes}
+                      onClick={(e) => handleSelectBinding(binding, e)}
+                      title="Click to edit · Ctrl+click to multi-select for merge"
+                    >
+                      <div className="row">
+                        {isMulti && <span className="multi-check">✓</span>}
+                        <span className="prop-name">{binding.displayName}</span>
+                        <span className="layer-count">{binding.layers.length}L</span>
+                      </div>
+                      <div className="expr-preview">{binding.expression || <em>(empty)</em>}</div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </>
         )}
       </section>
 
@@ -504,6 +626,61 @@ function App() {
               <button className="btn-primary" onClick={handleScanImport}>
                 Import {Object.values(scanSelected).filter(Boolean).length} selected
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {mergeOpen && selectedForMerge.length >= 2 && (
+        <div className="modal-backdrop" onClick={() => setMergeOpen(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">Merge {selectedForMerge.length} bindings</h2>
+              <button className="icon-btn" onClick={() => setMergeOpen(false)} aria-label="Close">×</button>
+            </div>
+
+            {mergeMatchNameConflict ? (
+              <div className="merge-conflict">
+                <strong>Different target properties.</strong> Bindings can only be merged when they target the same property. Selected:{' '}
+                {[...new Set(selectedForMerge.map(b => b.displayName))].join(', ')}.
+              </div>
+            ) : (
+              <>
+                <div className="modal-sub">
+                  Merging will lose some values. Set new ones as:
+                </div>
+
+                <div className="merge-options">
+                  <button className="merge-option" onClick={() => handleMerge('fuzzy')}>
+                    <div className="merge-option-title">Best guess (fuzzy)</div>
+                    <div className="merge-option-desc">
+                      Keep the first selected binding's values. Closest to what was there.
+                    </div>
+                  </button>
+                  <button className="merge-option" onClick={() => handleMerge('defaults')}>
+                    <div className="merge-option-title">App Defaults</div>
+                    <div className="merge-option-desc">
+                      Use the library snippet's defaults (falls back to first selected until Phase B ships).
+                    </div>
+                  </button>
+                </div>
+
+                <div className="merge-preview">
+                  <div className="merge-preview-label">Bindings to merge</div>
+                  <div className="layer-list">
+                    {selectedForMerge.map(b => (
+                      <div key={b.id} className="layer-item">
+                        <span className="layer-id">{b.layers.length}L</span>
+                        <span className="expr-preview" style={{ flex: 1 }}>{b.expression}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setMergeOpen(false)}>Cancel</button>
             </div>
           </div>
         </div>
