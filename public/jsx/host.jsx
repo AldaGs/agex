@@ -328,6 +328,146 @@ function loadWorkbenchState() {
 }
 
 // ---------------------------------------------------------------------------
+// Library (the Vault) — file-per-snippet storage under
+//   %AppData%/Roaming/AG-Extensions/agex/lib/<slug>.json
+// Sibling config dir reserved for provider settings (Phase C).
+// React owns JSON serialization and passes a `raw` string for writes; host
+// just does file I/O. For reads we splice raw file contents back into one
+// envelope, which avoids any hand-built stringification of nested snippets.
+// ---------------------------------------------------------------------------
+
+function _agexLibFolder() {
+    var base = Folder.userData.fsName + "/AG-Extensions/agex/lib";
+    var folder = new Folder(base);
+    if (!folder.exists) folder.create();
+    return folder;
+}
+
+function _agexConfigFolder() {
+    var base = Folder.userData.fsName + "/AG-Extensions/agex/config";
+    var folder = new Folder(base);
+    if (!folder.exists) folder.create();
+    return folder;
+}
+
+function _agexSanitizeId(id) {
+    return String(id).replace(/[^A-Za-z0-9_\-\.]/g, "_");
+}
+
+function listSnippets() {
+    try {
+        var folder = _agexLibFolder();
+        var files = folder.getFiles("*.json");
+        var parts = [];
+        for (var i = 0; i < files.length; i++) {
+            var f = files[i];
+            if (!(f instanceof File)) continue;
+            f.encoding = "UTF-8";
+            try {
+                f.open("r");
+                var content = f.read();
+                f.close();
+            } catch (ioErr) { continue; }
+            // Trust each file holds one JSON object literal. Skip malformed.
+            try {
+                eval("(" + content + ")");
+                parts.push(content);
+            } catch (parseErr) {}
+        }
+        return '{"success":true,"snippets":[' + parts.join(",") + ']}';
+    } catch (e) {
+        var safe = e.toString().replace(/"/g, "'");
+        return '{"success": false, "message": "' + safe + '"}';
+    }
+}
+
+function readSnippet(payloadString) {
+    try {
+        var payload = eval("(" + payloadString + ")");
+        var id = payload.id;
+        if (!id) return '{"success": false, "message": "id required."}';
+
+        var folder = _agexLibFolder();
+        var f = new File(folder.fsName + "/" + _agexSanitizeId(id) + ".json");
+        if (!f.exists) {
+            return '{"success": true, "found": false}';
+        }
+        f.encoding = "UTF-8";
+        f.open("r");
+        var content = f.read();
+        f.close();
+        return '{"success":true,"found":true,"snippet":' + content + '}';
+    } catch (e) {
+        var safe = e.toString().replace(/"/g, "'");
+        return '{"success": false, "message": "' + safe + '"}';
+    }
+}
+
+function writeSnippet(payloadString) {
+    try {
+        var payload = eval("(" + payloadString + ")");
+        var id = payload.id;
+        var raw = payload.raw;
+        if (!id || typeof raw !== "string") {
+            return '{"success": false, "message": "id + raw JSON string required."}';
+        }
+        var folder = _agexLibFolder();
+        var f = new File(folder.fsName + "/" + _agexSanitizeId(id) + ".json");
+        f.encoding = "UTF-8";
+        f.open("w");
+        f.write(raw);
+        f.close();
+        return '{"success": true, "path": "' + escapeForJSON(f.fsName) + '"}';
+    } catch (e) {
+        var safe = e.toString().replace(/"/g, "'");
+        return '{"success": false, "message": "' + safe + '"}';
+    }
+}
+
+function deleteSnippet(payloadString) {
+    try {
+        var payload = eval("(" + payloadString + ")");
+        var id = payload.id;
+        if (!id) return '{"success": false, "message": "id required."}';
+        var folder = _agexLibFolder();
+        var f = new File(folder.fsName + "/" + _agexSanitizeId(id) + ".json");
+        var existed = f.exists;
+        if (existed) f.remove();
+        return '{"success": true, "existed": ' + (existed ? 'true' : 'false') + '}';
+    } catch (e) {
+        var safe = e.toString().replace(/"/g, "'");
+        return '{"success": false, "message": "' + safe + '"}';
+    }
+}
+
+function factoryReset() {
+    try {
+        var libRemoved = 0;
+        var cfgRemoved = 0;
+        var lib = _agexLibFolder();
+        var libFiles = lib.getFiles();
+        for (var i = 0; i < libFiles.length; i++) {
+            if (libFiles[i] instanceof File) {
+                libFiles[i].remove();
+                libRemoved++;
+            }
+        }
+        var cfg = _agexConfigFolder();
+        var cfgFiles = cfg.getFiles();
+        for (var j = 0; j < cfgFiles.length; j++) {
+            if (cfgFiles[j] instanceof File) {
+                cfgFiles[j].remove();
+                cfgRemoved++;
+            }
+        }
+        return '{"success": true, "libRemoved": ' + libRemoved + ', "configRemoved": ' + cfgRemoved + '}';
+    } catch (e) {
+        var safe = e.toString().replace(/"/g, "'");
+        return '{"success": false, "message": "' + safe + '"}';
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Composition scan: walk the active comp and report every property that has
 // a non-empty expression. React groups the results by (matchName, expression)
 // for import into the Workbench.

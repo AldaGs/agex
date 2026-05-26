@@ -388,8 +388,8 @@ html, body, #root {
   border: 1px solid transparent;
   border-left: 3px solid var(--border-strong);
   border-radius: var(--radius-sm);
-  padding: 8px 10px;
-  margin-bottom: 6px;
+  padding: 6px 10px;
+  margin-bottom: 4px;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
 }
@@ -417,7 +417,6 @@ html, body, #root {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 3px;
 }
 
 .binding-card .prop-name {
@@ -718,6 +717,173 @@ html, body, #root {
   padding: 1px 6px;
   border-radius: 3px;
   flex-shrink: 0;
+}
+
+/* ------------- Library ------------- */
+.editor-header-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.library-btn { background: var(--accent-bg); color: var(--accent); }
+.library-btn:hover { background: #2a4a6b; color: #fff; }
+
+.library-modal { padding: 12px 14px; }
+
+.lib-search {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  color: var(--text);
+  font-size: 12px;
+  margin-bottom: 8px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.lib-search:focus { border-color: var(--accent); }
+.lib-search::placeholder { color: var(--text-muted); }
+
+.lib-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.lib-chip {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 3px 9px;
+  border-radius: 10px;
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.lib-chip:hover { background: var(--bg-3); color: var(--text); }
+
+.lib-chip.active {
+  background: var(--accent-bg);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.lib-list {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.lib-row { border-bottom: 1px solid var(--bg-2); }
+.lib-row:last-child { border-bottom: none; }
+
+.lib-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 8px 10px;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text);
+  transition: background 0.15s;
+}
+
+.lib-row-head:hover { background: var(--bg-2); }
+.lib-row.open .lib-row-head { background: var(--bg-2); }
+.lib-row.open .chevron { transform: none; }
+.lib-row:not(.open) .chevron { transform: rotate(-90deg); }
+
+.lib-row-text { flex: 1; min-width: 0; }
+
+.lib-row-title {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lib-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 3px;
+  flex-wrap: wrap;
+}
+
+.lib-cat {
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.lib-tag {
+  font-size: 9px;
+  background: var(--bg-3);
+  color: var(--text-dim);
+  padding: 1px 6px;
+  border-radius: 7px;
+}
+
+.badge-builtin {
+  background: var(--bg-3);
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.badge-user {
+  background: #2b3a1f;
+  color: #a3e635;
+  font-size: 9px;
+}
+
+.lib-row-body {
+  padding: 8px 12px 12px 28px;
+  background: var(--bg-0);
+}
+
+.lib-desc {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+.lib-code {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #d4d4d4;
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.lib-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.lib-insert-btn {
+  flex: 0 1 auto;
+  padding: 7px 14px;
+  font-size: 11px;
 }
 
 /* Scrollbars (CEP uses Chromium, so these apply) */

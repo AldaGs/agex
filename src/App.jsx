@@ -3,6 +3,7 @@ import { evalScript } from './cep-bridge';
 import Editor, { loader } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor';
 import { registerAECompletions } from './ae-dictionary';
+import Library from './Library';
 import './App.css';
 
 loader.config({ monaco });
@@ -45,6 +46,32 @@ function App() {
 
   // Expression-error map: `${layerId}:${matchName}` -> error string
   const [errorMap, setErrorMap] = useState({});
+
+  // Library
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const editorRef = useRef(null);
+
+  const handleEditorMount = (editor, monacoInstance) => {
+    editorRef.current = editor;
+    registerAECompletions(monacoInstance);
+  };
+
+  const insertSnippetIntoEditor = (body) => {
+    const editor = editorRef.current;
+    if (!editor) {
+      // Fallback if the editor ref isn't ready: append to expression state.
+      setExpression((prev) => (prev ? `${prev}\n${body}` : body));
+      return;
+    }
+    const selection = editor.getSelection();
+    editor.executeEdits('library-insert', [{
+      identifier: { major: 1, minor: 1 },
+      range: selection,
+      text: body,
+      forceMoveMarkers: true,
+    }]);
+    editor.focus();
+  };
 
   // Persistence state
   const [projectFsName, setProjectFsName] = useState(null);
@@ -605,11 +632,20 @@ function App() {
             )}
           </h2>
 
-          {selectedBindingId && activeBindingData && (
-            <button className="pill-btn" onClick={() => setIsLayersModalOpen(true)}>
-              {activeBindingData.layers.length} layer{activeBindingData.layers.length === 1 ? '' : 's'}
+          <div className="editor-header-actions">
+            {selectedBindingId && activeBindingData && (
+              <button className="pill-btn" onClick={() => setIsLayersModalOpen(true)}>
+                {activeBindingData.layers.length} layer{activeBindingData.layers.length === 1 ? '' : 's'}
+              </button>
+            )}
+            <button
+              className="pill-btn library-btn"
+              onClick={() => setLibraryOpen(true)}
+              title="Open the snippet library"
+            >
+              Library
             </button>
-          )}
+          </div>
         </div>
 
         <div className="editor-wrap">
@@ -618,7 +654,7 @@ function App() {
             defaultLanguage="javascript"
             theme="vs-dark"
             value={expression}
-            beforeMount={registerAECompletions}
+            onMount={handleEditorMount}
             onChange={(val) => setExpression(val || "")}
             options={{
               minimap: { enabled: false },
@@ -703,7 +739,7 @@ function App() {
                       key={binding.id}
                       className={classes}
                       onClick={(e) => handleSelectBinding(binding, e)}
-                      title="Click to edit · Ctrl+click to multi-select for merge"
+                      title={binding.expression || '(empty)'}
                     >
                       <div className="row">
                         {isMulti && <span className="multi-check">✓</span>}
@@ -713,7 +749,6 @@ function App() {
                         <span className="prop-name">{binding.displayName}</span>
                         <span className="layer-count">{binding.layers.length}L</span>
                       </div>
-                      <div className="expr-preview">{binding.expression || <em>(empty)</em>}</div>
                     </div>
                   );
                 })
@@ -722,6 +757,12 @@ function App() {
           </>
         )}
       </section>
+
+      <Library
+        open={libraryOpen}
+        onClose={() => setLibraryOpen(false)}
+        onInsert={insertSnippetIntoEditor}
+      />
 
       {scanGroups && (
         <div className="modal-backdrop" onClick={() => setScanGroups(null)}>

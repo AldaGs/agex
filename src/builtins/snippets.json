@@ -1,0 +1,112 @@
+[
+  {
+    "id": "wiggle-basic",
+    "name": "Wiggle (basic)",
+    "description": "Standard wiggle on the current property.",
+    "tags": ["wiggle", "noise", "random"],
+    "category": "Randomness",
+    "body": "let frq = 1.5;\nlet amp = 30;\nwiggle(frq, amp);",
+    "createdAt": "2026-01-01T00:00:00Z",
+    "updatedAt": "2026-01-01T00:00:00Z",
+    "source": "builtin"
+  },
+  {
+    "id": "wiggle-seeded",
+    "name": "Wiggle (seeded, stable)",
+    "description": "Wiggle with a fixed seed so it stays deterministic across renders and layer duplicates.",
+    "tags": ["wiggle", "noise", "seedRandom"],
+    "category": "Randomness",
+    "body": "let frq = 1.5;\nlet amp = 30;\nlet seed = 1;\nseedRandom(seed, true);\nwiggle(frq, amp);",
+    "createdAt": "2026-01-01T00:00:00Z",
+    "updatedAt": "2026-01-01T00:00:00Z",
+    "source": "builtin"
+  },
+  {
+    "id": "loop-out-cycle",
+    "name": "Loop Out (cycle)",
+    "description": "Cycle the last keyframes infinitely after the final keyframe.",
+    "tags": ["loop", "keyframes"],
+    "category": "Looping",
+    "body": "let type = \"cycle\";\nlet numKeys = 0;\nloopOut(type, numKeys);",
+    "createdAt": "2026-01-01T00:00:00Z",
+    "updatedAt": "2026-01-01T00:00:00Z",
+    "source": "builtin"
+  },
+  {
+    "id": "loop-out-pingpong",
+    "name": "Loop Out (pingpong)",
+    "description": "Pingpong the last keyframes back and forth.",
+    "tags": ["loop", "keyframes", "pingpong"],
+    "category": "Looping",
+    "body": "let type = \"pingpong\";\nlet numKeys = 0;\nloopOut(type, numKeys);",
+    "createdAt": "2026-01-01T00:00:00Z",
+    "updatedAt": "2026-01-01T00:00:00Z",
+    "source": "builtin"
+  },
+  {
+    "id": "inertial-bounce",
+    "name": "Inertial Bounce",
+    "description": "Classic bounce after the last keyframe. Amplitude scales with incoming velocity.",
+    "tags": ["bounce", "spring", "keyframes"],
+    "category": "Springs",
+    "body": "let amp = 0.1;\nlet freq = 2.0;\nlet decay = 2.0;\nlet n = 0;\nif (numKeys > 0) {\n  n = nearestKey(time).index;\n  if (key(n).time > time) n--;\n}\nif (n == 0) { t = 0; } else { t = time - key(n).time; }\nif (n > 0) {\n  let v = velocityAtTime(key(n).time - thisComp.frameDuration/10);\n  value + v*amp*Math.sin(freq*t*2*Math.PI)/Math.exp(decay*t);\n} else {\n  value;\n}",
+    "createdAt": "2026-01-01T00:00:00Z",
+    "updatedAt": "2026-01-01T00:00:00Z",
+    "source": "builtin"
+  },
+  {
+    "id": "overshoot",
+    "name": "Spring Overshoot",
+    "description": "Spring overshoot after the last keyframe.",
+    "tags": ["bounce", "spring", "overshoot"],
+    "category": "Springs",
+    "body": "let freq = 3;\nlet decay = 5;\nlet n = 0;\nif (numKeys > 0) {\n  n = nearestKey(time).index;\n  if (key(n).time > time) n--;\n}\nif (n > 0) {\n  let t = time - key(n).time;\n  let amp = velocityAtTime(key(n).time - thisComp.frameDuration/10);\n  let w = freq*Math.PI*2;\n  value + amp*(Math.sin(t*w)/Math.exp(decay*t)/w);\n} else {\n  value;\n}",
+    "createdAt": "2026-01-01T00:00:00Z",
+    "updatedAt": "2026-01-01T00:00:00Z",
+    "source": "builtin"
+  },
+  {
+    "id": "linear-remap-time",
+    "name": "Linear Remap (time → value)",
+    "description": "Linearly remap a time window to a value range.",
+    "tags": ["remap", "linear", "time"],
+    "category": "Easing",
+    "body": "let tIn = 0;\nlet tOut = 1;\nlet vIn = 0;\nlet vOut = 100;\nlinear(time, tIn, tOut, vIn, vOut);",
+    "createdAt": "2026-01-01T00:00:00Z",
+    "updatedAt": "2026-01-01T00:00:00Z",
+    "source": "builtin"
+  },
+  {
+    "id": "ease-remap-time",
+    "name": "Ease Remap (time → value)",
+    "description": "Eased remap of a time window to a value range.",
+    "tags": ["remap", "ease", "time"],
+    "category": "Easing",
+    "body": "let tIn = 0;\nlet tOut = 1;\nlet vIn = 0;\nlet vOut = 100;\nease(time, tIn, tOut, vIn, vOut);",
+    "createdAt": "2026-01-01T00:00:00Z",
+    "updatedAt": "2026-01-01T00:00:00Z",
+    "source": "builtin"
+  },
+  {
+    "id": "posterize-time",
+    "name": "Posterize Time",
+    "description": "Quantize the result to N frames per second. Place at the top of any expression to lock its update rate.",
+    "tags": ["time", "stepped"],
+    "category": "Time",
+    "body": "let fps = 8;\nposterizeTime(fps);\nvalue;",
+    "createdAt": "2026-01-01T00:00:00Z",
+    "updatedAt": "2026-01-01T00:00:00Z",
+    "source": "builtin"
+  },
+  {
+    "id": "clamp-range",
+    "name": "Clamp Value",
+    "description": "Clamp the current property value between min and max.",
+    "tags": ["clamp", "math"],
+    "category": "Math",
+    "body": "let lo = 0;\nlet hi = 100;\nclamp(value, lo, hi);",
+    "createdAt": "2026-01-01T00:00:00Z",
+    "updatedAt": "2026-01-01T00:00:00Z",
+    "source": "builtin"
+  }
+]
