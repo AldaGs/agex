@@ -440,6 +440,54 @@ function deleteSnippet(payloadString) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Generic config I/O under %AppData%/Roaming/AG-Extensions/agex/config/.
+// Used by Phase C (LLM provider settings) and reserved for any future
+// extension-wide settings files. Returns raw file contents as an escaped
+// string; JS side does JSON.parse on it.
+// ---------------------------------------------------------------------------
+function readConfig(payloadString) {
+    try {
+        var payload = eval("(" + payloadString + ")");
+        var name = payload.name;
+        if (!name) return '{"success": false, "message": "name required."}';
+        var folder = _agexConfigFolder();
+        var f = new File(folder.fsName + "/" + _agexSanitizeId(name) + ".json");
+        if (!f.exists) {
+            return '{"success": true, "found": false}';
+        }
+        f.encoding = "UTF-8";
+        f.open("r");
+        var content = f.read();
+        f.close();
+        return '{"success": true, "found": true, "raw": "' + escapeForJSON(content) + '"}';
+    } catch (e) {
+        var safe = e.toString().replace(/"/g, "'");
+        return '{"success": false, "message": "' + safe + '"}';
+    }
+}
+
+function writeConfig(payloadString) {
+    try {
+        var payload = eval("(" + payloadString + ")");
+        var name = payload.name;
+        var raw = payload.raw;
+        if (!name || typeof raw !== "string") {
+            return '{"success": false, "message": "name + raw required."}';
+        }
+        var folder = _agexConfigFolder();
+        var f = new File(folder.fsName + "/" + _agexSanitizeId(name) + ".json");
+        f.encoding = "UTF-8";
+        f.open("w");
+        f.write(raw);
+        f.close();
+        return '{"success": true, "path": "' + escapeForJSON(f.fsName) + '"}';
+    } catch (e) {
+        var safe = e.toString().replace(/"/g, "'");
+        return '{"success": false, "message": "' + safe + '"}';
+    }
+}
+
 function factoryReset() {
     try {
         var libRemoved = 0;

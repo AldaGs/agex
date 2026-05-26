@@ -4,6 +4,9 @@ import Editor, { loader } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor';
 import { registerAECompletions } from './ae-dictionary';
 import Library from './Library';
+import Settings from './Settings';
+import LLMDialog from './LLMDialog';
+import { getActiveProvider, getLLMConfig } from './llm';
 import './App.css';
 
 loader.config({ monaco });
@@ -47,8 +50,15 @@ function App() {
   // Expression-error map: `${layerId}:${matchName}` -> error string
   const [errorMap, setErrorMap] = useState({});
 
-  // Library
+  // Auto-naming queue: binding IDs awaiting a label from the LLM.
+  const [namingQueue, setNamingQueue] = useState(() => new Set());
+  const workbenchRef = useRef(workbench);
+  useEffect(() => { workbenchRef.current = workbench; }, [workbench]);
+
+  // Library + Settings + LLM dialog
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [llmOpen, setLlmOpen] = useState(false);
   const editorRef = useRef(null);
 
   const handleEditorMount = (editor, monacoInstance) => {
@@ -220,10 +230,11 @@ function App() {
         setStatus(`${injectResponse.message} Target: ${finalPropDisplay}`);
 
         if (activeComp.id) {
+          const newBindingId = Date.now().toString();
           setWorkbench(prev => {
             const currentCompList = prev[activeComp.id] || [];
             const newBinding = {
-              id: Date.now().toString(),
+              id: newBindingId,
               expression: expression,
               matchName: finalPropName,
               displayName: finalPropDisplay,
@@ -231,6 +242,7 @@ function App() {
             };
             return { ...prev, [activeComp.id]: [...currentCompList, newBinding] };
           });
+          enqueueAutoName([newBindingId]);
         }
       } else {
         setStatus(`Error: ${injectResponse.message}`);
@@ -345,11 +357,12 @@ function App() {
         setStatus(`Error during merge: ${res.message}`);
         return;
       }
+      const mergedId = `${Date.now()}-merge`;
       setWorkbench(prev => {
         const current = prev[activeComp.id] || [];
         const kept = current.filter(b => !multiSelect.has(b.id));
         const merged = {
-          id: `${Date.now()}-merge`,
+          id: mergedId,
           expression: canonicalExpression,
           matchName,
           displayName,
@@ -357,6 +370,7 @@ function App() {
         };
         return { ...prev, [activeComp.id]: [...kept, merged] };
       });
+      enqueueAutoName([mergedId]);
       setStatus(`Merged ${selectedForMerge.length} bindings → ${displayName} (${allLayers.length} layers).`);
       setMultiSelect(new Set());
       setMergeOpen(false);
@@ -411,6 +425,67 @@ function App() {
   // Helper: does any layer in this binding have an error?
   const bindingHasError = (b) =>
     b.layers.some(l => errorMap[`${l.id}:${b.matchName}`]);
+
+  // Process the auto-name queue one entry at a time. The effect re-runs each
+  // time the queue mutates; we always work the first ID, then dequeue —
+  // which causes a new run for the next. Serial by construction.
+  useEffect(() => {
+    if (namingQueue.size === 0) return;
+    let cancelled = false;
+    const id = [...namingQueue][0];
+
+    (async () => {
+      const cfg = await getLLMConfig();
+      if (cfg.autoName === false) {
+        if (!cancelled) setNamingQueue(new Set());
+        return;
+      }
+      // Find the binding wherever it lives.
+      let binding = null;
+      const snap = workbenchRef.current;
+      for (const list of Object.values(snap)) {
+        const found = list.find((b) => b.id === id);
+        if (found) { binding = found; break; }
+      }
+      const dequeue = () => setNamingQueue((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      if (!binding) { if (!cancelled) dequeue(); return; }
+
+      try {
+        const provider = await getActiveProvider();
+        const name = await provider.autoName(binding.expression);
+        if (cancelled || !name) return;
+        const cleaned = name.split('\n')[0].slice(0, 60).trim();
+        if (!cleaned) return;
+        setWorkbench((prev) => {
+          const out = {};
+          for (const compId of Object.keys(prev)) {
+            out[compId] = prev[compId].map((b) =>
+              b.id === id ? { ...b, label: cleaned } : b
+            );
+          }
+          return out;
+        });
+      } catch (_) {
+        // Silent — keep displayName as fallback
+      } finally {
+        if (!cancelled) dequeue();
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [namingQueue]);
+
+  const enqueueAutoName = (ids) => {
+    setNamingQueue((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) next.add(id);
+      return next;
+    });
+  };
 
   // ESC clears multi-select / closes merge dialog
   useEffect(() => {
@@ -486,17 +561,18 @@ function App() {
       setScanGroups(null);
       return;
     }
+    const additions = toImport.map((g, idx) => ({
+      id: `${Date.now()}-${idx}`,
+      expression: g.expression,
+      matchName: g.matchName,
+      displayName: g.displayName,
+      layers: g.layers,
+    }));
     setWorkbench(prev => {
       const current = prev[activeComp.id] || [];
-      const additions = toImport.map((g, idx) => ({
-        id: `${Date.now()}-${idx}`,
-        expression: g.expression,
-        matchName: g.matchName,
-        displayName: g.displayName,
-        layers: g.layers,
-      }));
       return { ...prev, [activeComp.id]: [...current, ...additions] };
     });
+    enqueueAutoName(additions.map((b) => b.id));
     setStatus(`Imported ${toImport.length} binding${toImport.length === 1 ? '' : 's'}.`);
     setScanGroups(null);
     setScanSelected({});
@@ -614,6 +690,14 @@ function App() {
           <span className={`comp-name ${activeComp.id ? '' : 'empty'}`}>{activeComp.name}</span>
         </div>
         <div className={`status-pill ${statusLevel}`} title={status}>{status}</div>
+        <button
+          className="icon-btn topbar-gear"
+          onClick={() => setSettingsOpen(true)}
+          title="Settings"
+          aria-label="Open settings"
+        >
+          ⚙
+        </button>
       </header>
 
       <section className="editor-section">
@@ -638,6 +722,13 @@ function App() {
                 {activeBindingData.layers.length} layer{activeBindingData.layers.length === 1 ? '' : 's'}
               </button>
             )}
+            <button
+              className="pill-btn ai-btn"
+              onClick={() => setLlmOpen(true)}
+              title="Ask the configured LLM to write or modify the expression"
+            >
+              Ask AI
+            </button>
             <button
               className="pill-btn library-btn"
               onClick={() => setLibraryOpen(true)}
@@ -746,9 +837,15 @@ function App() {
                         {bindingHasError(binding) && (
                           <span className="error-dot" title="One or more layers report an AE expression error" />
                         )}
-                        <span className="prop-name">{binding.displayName}</span>
+                        <span className="prop-name">{binding.label || binding.displayName}</span>
+                        {namingQueue.has(binding.id) && (
+                          <span className="naming-spinner" title="Auto-naming…">…</span>
+                        )}
                         <span className="layer-count">{binding.layers.length}L</span>
                       </div>
+                      {binding.label && (
+                        <div className="binding-subtitle">{binding.displayName}</div>
+                      )}
                     </div>
                   );
                 })
@@ -762,6 +859,22 @@ function App() {
         open={libraryOpen}
         onClose={() => setLibraryOpen(false)}
         onInsert={insertSnippetIntoEditor}
+      />
+
+      <Settings
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+      />
+
+      <LLMDialog
+        open={llmOpen}
+        onClose={() => setLlmOpen(false)}
+        context={{
+          propertyName: activeBindingData?.displayName || '',
+          currentExpression: expression,
+        }}
+        onInsert={insertSnippetIntoEditor}
+        onReplace={(text) => setExpression(text)}
       />
 
       {scanGroups && (
