@@ -1,135 +1,217 @@
-# agex - Global Expression Injector
+# agex — Global Expression Injector
 
-**agex** is a context-aware Adobe After Effects CEP extension designed to streamline the management and bulk-injection of expressions. It replaces repetitive stopwatch-clicking with a smart, centralized "Workbench" and a native, dark-mode IDE experience.
+**agex** is a context-aware Adobe After Effects CEP extension for managing and bulk-injecting expressions. It replaces repetitive stopwatch-clicking with a smart, centralized **Workbench**, a snippet **Vault**, an **AI agent**, and a native dark-mode IDE — all inside the AE panel.
 
-## ✨ Core Features
+---
 
-* **Smart Timeline Extraction:** No need to manually type property match names or layer IDs. Simply highlight properties in the AE timeline, write your code, and click inject. agex automatically traverses the DOM to extract layer IDs and property names.
-* **The Workbench (Context-Aware Bindings):** agex silently tracks your active composition. When you inject an expression, it saves the binding data as a card to the Workbench. Switching compositions automatically filters the Workbench to show only the expressions active in your current view.
-* **Integrated Monaco Editor:** Write ExtendScript in a true IDE environment right inside After Effects, featuring syntax highlighting, auto-pairing, and code folding, powered by the core engine behind VS Code.
-* **Conflict Prevention:** A built-in collision checker prevents you from accidentally injecting multiple master expressions into the same layer property, keeping your project architecture clean.
-* **Layer Inspection:** A sub-dialog modal allows you to quickly view the exact layer names and immutable IDs linked to any active binding.
+## ✨ Features
 
-## 🛠 Tech Stack
+### Workbench (context-aware bindings)
+- **Smart timeline extraction** — select properties in the timeline, write code, click Add. agex walks the DOM, captures layer IDs + match names automatically.
+- **Comp-scoped filtering** — bindings are silently tracked per composition; switching comps switches the view.
+- **Layer-ID tracking** — bindings survive layer renames, reordering, and most edits.
+- **Add / remove layers** on existing bindings without re-injecting from scratch.
+- **Per-card delete** — the × on a card clears the AE-side expression on all its layers and drops the card.
+- **Multi-property per layer** — a single layer can carry Position + Rotation + Scale + Opacity as four separate bindings.
+- **Multi-select merge** — Ctrl/Cmd-click two or more bindings, choose **Best guess (fuzzy)** or **App Defaults** to consolidate.
+- **Scan composition** — walks the entire comp for existing expressions and imports them as bindings, grouping byte-identical expressions automatically.
+- **Inline error surfacing** — AE's `expressionError` is polled every 2 s; broken bindings get a red dot and the actual error message in the layers modal.
 
-* **Frontend:** React (via Vite)
-* **Backend:** ExtendScript (ES3)
-* **Bridge:** Adobe `CSInterface.js`
-* **Editor:** `@monaco-editor/react` (bundled locally for offline use)
+### Persistence
+- **XMP-embedded state** — Workbench state JSON is stored inside the `.aep`'s XMP packet under namespace `http://custom.ag.agex/` (prefix `agex:`). No sidecar files, no external database.
+- **Debounced autosave** — 500 ms after any mutation. A pulsing dot in the topbar marks in-memory drift.
+- **Crash-recovery log** — every save also mirrors to `%AppData%/Roaming/AG-Extensions/agex/log/current-state.json`; wiped on project switch.
+- **"Saved HH:MM"** indicator reads the on-disk `.aep` mtime via `app.project.file.modified`.
 
-## 🚀 Installation & Setup (Developer Mode)
+### The Vault (snippet library)
+- **File-per-snippet** at `%AppData%/Roaming/AG-Extensions/agex/lib/<slug>.json`. No cloud logic — symlink the folder to Dropbox/etc. if you want sync.
+- **10 bundled built-ins** across Randomness, Looping, Springs, Easing, Time, Math.
+- **Editing a built-in forks it** to user space with `source: "user"`; the original stays visible.
+- **Parameter convention** — snippets declare parameters as top-of-body `let` statements; the Monaco editor itself is the param UI.
+- **Search + category chips + tags**.
+- **CRUD UI** — create, edit, delete, fork-to-user.
+- **Click-to-insert** at the Monaco cursor (replaces selection if any).
+- **Export / Import** bundles via native OS file dialogs (single versioned JSON).
+- **Factory Reset** wipes `lib/` and `config/` — built-ins re-emerge pristine.
 
-Because this is an unsigned, local development extension, you must enable PlayerDebugMode in the Windows Registry and symlink the project folder to Adobe's CEP directory.
+### Ask Agent (LLM assistance)
+- **Pluggable provider interface** with three providers shipped:
+  - **Ollama (local, default)** — `http://localhost:11434`, recommended model `qwen2.5-coder:7b`
+  - **Claude (Anthropic)** — direct browser-origin calls with proper headers
+  - **OpenAI** — chat completions
+- **Modeless dialog** with prompt textarea + Ctrl+Enter generate. Preserves your last prompt and result across opens.
+- **Read-only Monaco viewer** for results — syntax highlighting, line numbers, soft wrap, horizontal scroll.
+- **Context-aware prompts** — the target property name + your current expression buffer are sent as context.
+- **Background auto-naming** — new bindings receive a friendly 2-5-word label from the LLM on a serial queue (no parallel hammering of local models). Toggle in Settings.
+
+### Monaco editor
+- AE expression dictionary (`time`, `value`, `thisComp`, `wiggle`, `valueAtTime`, …) plus a curated subset of JS stdlib (`Math.*`, `JSON.*`, etc.).
+- **Built-in JS/TS completion suppressed** so suggestions stay AE-relevant.
+- Dictionary auto-generates from [`expression-globals-typescript`](https://github.com/motiondeveloper/expression-globals-typescript) via `npm run build:dict`.
+- Multi-line snippets like *inertial bounce* and *spring overshoot* with tab-stop parameters.
+
+### Safety & history
+- **Workbench undo/redo** — full-state snapshots, cap 50, ↶ / ↷ pills in the workbench header. Ctrl+Z / Ctrl+Y. Resets on project switch.
+- **Per-binding version history** — last 10 expression versions per binding with timestamps. ⌚ N pill in the editor header opens a viewer with Restore.
+
+### UX
+- Narrow-panel-first layout (single column at ≤ 400 px; auto-grids to 2–3 columns when the panel is wider).
+- Color-coded status pill (idle / ok / busy / error) with `aria-live` for screen readers.
+- All major modals are `role="dialog" aria-modal="true"`.
+
+---
+
+## ⌨️ Keyboard shortcuts
+
+| Shortcut | Action | Scope |
+|---|---|---|
+| `Ctrl+S` | Force-flush autosave to XMP | global (even inside Monaco) |
+| `Ctrl+L` | Open Library | global |
+| `Ctrl+K` | Open Ask Agent | global |
+| `Ctrl+,` | Open Settings | global |
+| `Ctrl+Z` | Workbench undo | extension UI only |
+| `Ctrl+Y` / `Ctrl+Shift+Z` | Workbench redo | extension UI only |
+| `Ctrl+Enter` | Generate (inside Ask Agent prompt) | dialog-local |
+| `Esc` | Close current modal / clear multi-select | context |
+| Click | Load binding into editor | Workbench |
+| Ctrl/Cmd + Click | Toggle binding for merge | Workbench |
+
+---
+
+## 🛠 Tech stack
+
+- **Frontend:** React 19 + Vite 8, Monaco editor (`@monaco-editor/react`), lucide-react icons — all bundled, no runtime CDN.
+- **Bridge:** Adobe `CSInterface.js` → ExtendScript host.
+- **Backend (host):** ExtendScript (ES3) in `public/jsx/host.jsx`. No Node.js runtime usage.
+- **Persistence:** Adobe XMP (`app.project.xmpPacket`) via `lib:AdobeXMPScript`.
+- **LLM:** plain `fetch` from CEP's Chromium to Ollama / Anthropic / OpenAI.
+
+---
+
+## 🚀 Installation & setup
 
 ### 1. Enable PlayerDebugMode
-Open PowerShell and run the following command to blanket-enable debug mode for all modern After Effects versions (CSXS.11 through CSXS.16):
+
+CEP requires this for any unsigned local extension. Open PowerShell:
+
 ```powershell
 11..16 | ForEach-Object { reg add "HKCU\Software\Adobe\CSXS.$_" /v PlayerDebugMode /t REG_SZ /d "1" /f }
-
 ```
 
-### 2. Install Dependencies
-
-Navigate to the project root and install the required NPM packages (including the local Monaco engine):
+### 2. Install dependencies and build
 
 ```bash
 npm install
-npm install monaco-editor @monaco-editor/react
-
+npm run build
 ```
 
-### 3. Build the Frontend
+Tip: `npm run build -- --watch` rebuilds on save during active development.
 
-CEP requires absolute file paths or a relative base. Vite is configured to output a relative build.
+### 3. (Optional) Generate the full AE dictionary
+
+The repo ships with a curated hand-written set of completions. To merge in the full set parsed from `expression-globals-typescript`:
 
 ```bash
+npm run build:dict
 npm run build
-
 ```
 
-*(Tip: Run `npm run build -- --watch` during active development to auto-compile React changes).*
+The generated file (`src/ae-dictionary.generated.json`) is gitignored — regenerate as needed.
 
-### 4. Create the Adobe Symlink
+### 4. Symlink into Adobe's CEP folder
 
-Open **Command Prompt as Administrator** and create a directory symlink pointing from Adobe's AppData folder to your local project folder.
+Open **Command Prompt as Administrator**:
 
 ```cmd
-mklink /D "C:\Users\<YourUsername>\AppData\Roaming\Adobe\CEP\extensions\agex" "C:\Path\To\Your\global-expression-injector"
-
+mklink /D "C:\Users\<YourUsername>\AppData\Roaming\Adobe\CEP\extensions\agex" "C:\Path\To\Your\agex"
 ```
 
-*Note: Ensure the symlink points directly to the folder containing the `CSXS` directory and `manifest.xml`.*
+The symlink must point at the folder containing `CSXS/manifest.xml`.
 
-### 5. Debugging
+### 5. Open in After Effects
 
-To open Chrome Developer Tools inside After Effects:
+Window → Extensions → agex.
 
-1. Ensure the `.debug` file is present in the project root containing the `<Host Name="AEFT" Port="8088" />` configuration.
-2. Open the extension in After Effects.
-3. Open a normal Chrome browser and navigate to `http://localhost:8088`.
+### 6. (Optional) Configure LLM
 
-## 📁 Project Structure
+Click the gear ⚙ in the topbar.
+
+- **Ollama (recommended for local use)** — install [Ollama](https://ollama.com), then:
+  ```bash
+  ollama pull qwen2.5-coder:7b
+  # Allow CEP's file:// origin to call Ollama:
+  set OLLAMA_ORIGINS=*       # Windows (cmd)
+  $env:OLLAMA_ORIGINS = "*"  # PowerShell
+  ollama serve
+  ```
+  In Settings: endpoint `http://localhost:11434`, model `qwen2.5-coder:7b`, **Test connection**.
+- **Claude** — paste an `sk-ant-…` key from [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys).
+- **OpenAI** — paste an `sk-…` key with billing configured.
+
+### Debugging the panel
+
+A `.debug` file in the project root exposes Chrome DevTools on port 8088. Open any Chrome window → `http://localhost:8088` → click the agex panel target.
+
+---
+
+## 📁 Project structure
 
 ```text
-global-expression-injector/
-├── .debug                       # Exposes port 8088 for Chrome DevTools
-├── CSXS/
-│   └── manifest.xml             # Adobe extension configuration (ID: com.ag.agex)
+agex/
+├── .debug                              # Exposes port 8088 for DevTools
+├── CSXS/manifest.xml                   # Extension manifest (ID: com.ag.agex)
 ├── public/
-│   ├── CSInterface.js           # Adobe's frontend-to-backend bridge
-│   └── jsx/
-│       └── host.jsx             # ExtendScript backend logic
+│   ├── CSInterface.js                  # Adobe bridge
+│   └── jsx/host.jsx                    # All ExtendScript host functions
 ├── scripts/
-│   └── build-dictionary.mjs     # Parses expression-globals-typescript → ae-dictionary.generated.json
+│   └── build-dictionary.mjs            # AE dictionary generator (TS AST walk)
 ├── src/
-│   ├── App.jsx                  # Main React interface and state management
-│   ├── App.css                  # CSS variables + component styles (no inline styles)
-│   ├── ae-dictionary.js         # Monaco completion provider + hand-written AE entries
-│   ├── ae-dictionary.generated.json  # Auto-generated AE globals (run `npm run build:dict`)
-│   ├── cep-bridge.js            # Wrapper for CSInterface evaluation and JSON parsing
-│   └── main.jsx                 # React DOM entry
-├── CLAUDE.md                    # Engineering memo: locked decisions, conventions, contracts
+│   ├── App.jsx                         # Root component + state
+│   ├── App.css                         # All styles (CSS variables, no inline)
+│   ├── main.jsx                        # React DOM entry
+│   ├── cep-bridge.js                   # evalScript() wrapper
+│   ├── ae-dictionary.js                # Monaco completion provider + hand-written entries
+│   ├── ae-dictionary.generated.json    # Generated AE globals (gitignored)
+│   ├── vault.js                        # Library data layer (load/save/import/export)
+│   ├── builtins/snippets.json          # Bundled built-in snippets
+│   ├── Library.jsx                     # Vault browser + CRUD
+│   ├── Settings.jsx                    # Provider configuration
+│   ├── LLMDialog.jsx                   # Ask Agent dialog
+│   ├── VersionHistory.jsx              # Per-binding version viewer
+│   └── llm/
+│       ├── provider.js                 # Base class + shared system prompts
+│       ├── ollama.js                   # Local provider (default)
+│       ├── claude.js                   # Anthropic provider
+│       ├── openai.js                   # OpenAI provider
+│       ├── config.js                   # Settings load/save
+│       └── index.js                    # Registry + getActiveProvider()
+├── CLAUDE.md                           # Engineering memo (decisions, conventions, contracts)
 ├── package.json
-└── vite.config.js               # Configured for relative base paths (./)
-
+└── vite.config.js
 ```
+
+User data lives at `%AppData%/Roaming/AG-Extensions/agex/`:
+- `lib/<slug>.json` — user snippets
+- `config/llm.json` — provider settings
+- `log/current-state.json` — crash-recovery mirror of latest Workbench state
+
+---
 
 ## 🗺 Roadmap
 
-The full engineering plan, locked architectural decisions, and conventions live in [`CLAUDE.md`](CLAUDE.md). Public-facing summary:
+The original four-phase plan (A–D) has all shipped. Future ideas that surfaced during build:
 
-### Phase A — Close the data loop
-- [ ] **XMP-based persistence.** Workbench state serialized to `app.project.xmpPacket` under namespace `http://custom.ag.agex/` (prefix `agex:`). Two ExtendScript entry points (`saveWorkbenchState`, `loadWorkbenchState`) with debounced autosave and a dirty indicator in the topbar.
-- [ ] **Scan composition.** Walk the active comp for properties with non-empty expressions and import them as Workbench bindings.
-- [ ] **Unifier.** Group scanned bindings by identical expression; on merge prompt the user to set new defaults via "Best guess (fuzzy)" or "App Defaults".
-- [ ] **Per-binding layer management.** Add/remove target layers on existing bindings without re-injecting from scratch.
-- [ ] **Error surfacing.** Poll `property.expressionError` and flag broken bindings inline.
+- Param-form UI for `let X = Y;` declarations (slider/picker per param) — currently the editor itself fills this role.
+- Drag-to-reorder bindings.
+- Per-comp undo history (currently global per session).
+- Encrypted API keys at rest.
+- Friendlier upstream-error mapping (e.g. detect Claude 401 / OpenAI 429 → inline "Open Settings" action).
+- Fuzzy unifier (currently exact-string match).
 
-### Phase B — The Vault (library)
-- [ ] **User library** at `%AppData%/Roaming/AG-Extensions/agex/lib/<slug>.json`, one file per snippet. No cloud logic — users symlink the folder if they want sync.
-- [ ] **Bundled built-ins** ship read-only; editing forks the snippet to user space. A **Factory Reset** wipes user space.
-- [ ] **Search + filter** by name, tag, and category.
-- [ ] **Full CRUD inside agex.** New snippets enforce the parameter convention: top-of-snippet `let` declarations (`let frq = 10; let amp = 10; wiggle(frq, amp);`) so the Monaco editor itself is the parameter UI.
-- [ ] **Click-to-insert** from library into the current editor buffer.
+Engineering details and locked decisions live in [`CLAUDE.md`](CLAUDE.md).
 
-### Phase C — LLM assistance
-- [ ] **Pluggable provider interface** with local-first default (Ollama on `localhost:11434`). Optional Claude / OpenAI providers.
-- [ ] **Modeless "Help from LLM" dialog** for prompt-driven expression generation.
-- [ ] **Auto-naming** of unnamed bindings on save (background, debounced).
-- [ ] **Settings panel** at `%AppData%/Roaming/AG-Extensions/agex/config/` for provider selection.
+---
 
-### Phase D — Safety + polish
-- [ ] **Workbench-level undo/redo** via keyboard shortcuts scoped to the extension UI (not Monaco's buffer, not AE itself).
-- [ ] **Per-binding version history** — last 10 expression versions with timestamps.
-- [ ] **Export/import** library bundles (zip of `lib/`) for manual sharing.
-- [ ] **Accessibility pass** and remaining keyboard shortcuts.
+## 📄 License
 
-### Already shipped
-- Smart timeline extraction (smartInject)
-- Context-aware Workbench filtered by active comp
-- Layer-ID-based binding tracking (survives renames)
-- Collision prevention on injection
-- Layer inspection modal
-- Monaco editor with AE-aware completions (built-in JS/TS suggestions suppressed)
-- AE dictionary auto-generation from `expression-globals-typescript`
-```
+This project is provided as-is for personal and educational use. After Effects, ExtendScript, and CEP are trademarks of Adobe Inc. and used here under their standard developer terms.
