@@ -488,6 +488,47 @@ function writeConfig(payloadString) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Library bundle export/import (D3) via native File save/open dialogs.
+// React collects the snippet array and stringifies; we just persist the
+// chosen path on export, and return the raw file contents on import.
+// ---------------------------------------------------------------------------
+function exportBundle(payloadString) {
+    try {
+        var payload = eval("(" + payloadString + ")");
+        var raw = payload.raw;
+        if (typeof raw !== "string") return '{"success": false, "message": "raw required."}';
+        var f = File.saveDialog("Export agex library bundle", "JSON:*.json");
+        if (!f) return '{"success": true, "cancelled": true}';
+        if (!/\.json$/i.test(f.fsName)) {
+            f = new File(f.fsName + ".json");
+        }
+        f.encoding = "UTF-8";
+        f.open("w");
+        f.write(raw);
+        f.close();
+        return '{"success": true, "path": "' + escapeForJSON(f.fsName) + '"}';
+    } catch (e) {
+        var safe = e.toString().replace(/"/g, "'");
+        return '{"success": false, "message": "' + safe + '"}';
+    }
+}
+
+function importBundle() {
+    try {
+        var f = File.openDialog("Import agex library bundle", "JSON:*.json");
+        if (!f) return '{"success": true, "cancelled": true}';
+        f.encoding = "UTF-8";
+        f.open("r");
+        var content = f.read();
+        f.close();
+        return '{"success": true, "raw": "' + escapeForJSON(content) + '"}';
+    } catch (e) {
+        var safe = e.toString().replace(/"/g, "'");
+        return '{"success": false, "message": "' + safe + '"}';
+    }
+}
+
 function factoryReset() {
     try {
         var libRemoved = 0;
@@ -672,12 +713,14 @@ function peekSelection() {
 
         var resultLayers = [];
         var resultProperties = [];
+        var resultPairs = []; // exact (layerId, matchName) tuples for accurate conflict checks
         var uniqueProps = {};
         var uniqueLayers = {};
+        var uniquePairs = {};
 
         for (var i = 0; i < selectedProps.length; i++) {
             var prop = selectedProps[i];
-            
+
             if (prop.canSetExpression) {
                 if (!uniqueProps[prop.matchName]) {
                     uniqueProps[prop.matchName] = true;
@@ -691,6 +734,20 @@ function peekSelection() {
                     var safeLayerName = layer.name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
                     resultLayers.push('{"id": ' + layer.id + ', "name": "' + safeLayerName + '"}');
                 }
+                if (layer) {
+                    var pairKey = layer.id + ":" + prop.matchName;
+                    if (!uniquePairs[pairKey]) {
+                        uniquePairs[pairKey] = true;
+                        var safeLayerName2 = layer.name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+                        var safePropName2 = prop.name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+                        resultPairs.push(
+                            '{"layerId":' + layer.id +
+                            ',"layerName":"' + safeLayerName2 +
+                            '","matchName":"' + prop.matchName +
+                            '","displayName":"' + safePropName2 + '"}'
+                        );
+                    }
+                }
             }
         }
 
@@ -700,7 +757,8 @@ function peekSelection() {
 
         var jsonString = '{"success": true, ';
         jsonString += '"layers": [' + resultLayers.join(',') + '], ';
-        jsonString += '"properties": [' + resultProperties.join(',') + ']';
+        jsonString += '"properties": [' + resultProperties.join(',') + '], ';
+        jsonString += '"pairs": [' + resultPairs.join(',') + ']';
         jsonString += '}';
 
         return jsonString;

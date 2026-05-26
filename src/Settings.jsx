@@ -71,7 +71,7 @@ export default function Settings({ open, onClose }) {
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal settings-modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal settings-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Settings">
         <div className="modal-header">
           <h2 className="modal-title">Settings</h2>
           <button className="icon-btn" onClick={onClose} aria-label="Close">×</button>

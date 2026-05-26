@@ -6,6 +6,7 @@ import { registerAECompletions } from './ae-dictionary';
 import Library from './Library';
 import Settings from './Settings';
 import LLMDialog from './LLMDialog';
+import VersionHistory from './VersionHistory';
 import { getActiveProvider, getLLMConfig } from './llm';
 import { Bot } from 'lucide-react';
 import './App.css';
@@ -56,10 +57,20 @@ function App() {
   const workbenchRef = useRef(workbench);
   useEffect(() => { workbenchRef.current = workbench; }, [workbench]);
 
-  // Library + Settings + LLM dialog
+  // Workbench-level undo/redo. History captures full-workbench snapshots
+  // (cheap — bindings are small JSON). Cap each stack at 50 entries. Reset
+  // when the project changes.
+  const HISTORY_LIMIT = 50;
+  const [historyPast, setHistoryPast] = useState([]);
+  const [historyFuture, setHistoryFuture] = useState([]);
+  const skipHistoryRef = useRef(true); // skip initial mount
+  const prevWorkbenchRef = useRef(workbench);
+
+  // Library + Settings + LLM + History
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [llmOpen, setLlmOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const editorRef = useRef(null);
 
   const handleEditorMount = (editor, monacoInstance) => {
@@ -134,6 +145,11 @@ function App() {
       if (fp.fsName !== projectFsName) {
         setProjectFsName(fp.fsName);
         bootedRef.current = false;
+        // Project changed — drop history so undo can't replay another
+        // project's bindings into the wrong xmpPacket.
+        setHistoryPast([]);
+        setHistoryFuture([]);
+        skipHistoryRef.current = true;
         try { await evalScript('clearStateLog'); } catch (_) {}
         try {
           const res = await evalScript('loadWorkbenchState');
@@ -202,16 +218,32 @@ function App() {
         return;
       }
 
-      const existingLayerIds = new Set();
+      // Conflict check at the (layerId, matchName) tuple level so a layer
+      // can carry expressions on multiple properties (Position + Rotation,
+      // Scale + Opacity…) across separate bindings.
+      const existingPairs = new Set();
       activeBindings.forEach(binding => {
-        binding.layers.forEach(layer => existingLayerIds.add(layer.id));
+        binding.layers.forEach(layer => existingPairs.add(`${layer.id}:${binding.matchName}`));
       });
 
-      const conflictingLayers = peekResponse.layers.filter(layer => existingLayerIds.has(layer.id));
+      const peekedPairs = peekResponse.pairs || (
+        (peekResponse.properties || []).flatMap(p =>
+          (peekResponse.layers || []).map(l => ({
+            layerId: l.id, layerName: l.name,
+            matchName: p.matchName, displayName: p.displayName,
+          }))
+        )
+      );
 
-      if (conflictingLayers.length > 0) {
-        const conflictNames = conflictingLayers.map(l => l.name).join(', ');
-        setStatus(`Conflict: Layer(s) already in Workbench: ${conflictNames}`);
+      const conflictingPairs = peekedPairs.filter(p => existingPairs.has(`${p.layerId}:${p.matchName}`));
+
+      if (conflictingPairs.length > 0) {
+        const desc = conflictingPairs
+          .map(p => `${p.layerName} · ${p.displayName}`)
+          .slice(0, 3)
+          .join(', ');
+        const more = conflictingPairs.length > 3 ? ` (+${conflictingPairs.length - 3} more)` : '';
+        setStatus(`Conflict: already in Workbench → ${desc}${more}`);
         return;
       }
 
@@ -254,8 +286,13 @@ function App() {
     }
   };
 
+  const VERSION_LIMIT = 10;
   const handleUpdateBinding = async () => {
     if (!selectedBindingId) return;
+    if (expression === activeBindingData.expression) {
+      setStatus("No changes to update.");
+      return;
+    }
     setStatus("Updating...");
 
     const payload = {
@@ -269,15 +306,19 @@ function App() {
 
       if (response.success) {
         setStatus(`Updated ${response.layers.length} properties.`);
+        const versionEntry = {
+          expression: activeBindingData.expression,
+          savedAt: new Date().toISOString(),
+        };
         setWorkbench(prev => {
           const currentCompList = prev[activeComp.id] || [];
           return {
             ...prev,
-            [activeComp.id]: currentCompList.map(b =>
-              b.id === selectedBindingId
-                ? { ...b, expression, layers: response.layers }
-                : b
-            )
+            [activeComp.id]: currentCompList.map(b => {
+              if (b.id !== selectedBindingId) return b;
+              const versions = [versionEntry, ...(b.versions || [])].slice(0, VERSION_LIMIT);
+              return { ...b, expression, layers: response.layers, versions };
+            })
           };
         });
       } else {
@@ -286,6 +327,53 @@ function App() {
     } catch (error) {
       console.error(error);
       setStatus("Error connecting to host.");
+    }
+  };
+
+  // Restore a previous expression version. Re-injects via smartInject, then
+  // shuffles: incoming current → top of versions, restored → current.
+  const handleRestoreVersion = async (versionIndex) => {
+    if (!activeBindingData) return;
+    const versions = activeBindingData.versions || [];
+    if (versionIndex < 0 || versionIndex >= versions.length) return;
+    const target = versions[versionIndex];
+
+    setStatus("Restoring previous version…");
+    try {
+      const res = await evalScript('smartInject', {
+        expression: target.expression,
+        targetProperty: activeBindingData.matchName,
+        layerIds: activeBindingData.layers.map(l => l.id),
+      });
+      if (!res.success) {
+        setStatus(`Error: ${res.message}`);
+        return;
+      }
+      const versionEntry = {
+        expression: activeBindingData.expression,
+        savedAt: new Date().toISOString(),
+      };
+      const remaining = versions.filter((_, i) => i !== versionIndex);
+      setWorkbench(prev => {
+        const list = prev[activeComp.id] || [];
+        return {
+          ...prev,
+          [activeComp.id]: list.map(b => {
+            if (b.id !== activeBindingData.id) return b;
+            return {
+              ...b,
+              expression: target.expression,
+              layers: res.layers || b.layers,
+              versions: [versionEntry, ...remaining].slice(0, VERSION_LIMIT),
+            };
+          }),
+        };
+      });
+      setExpression(target.expression);
+      setStatus("Version restored.");
+    } catch (e) {
+      console.error(e);
+      setStatus("Error restoring version.");
     }
   };
 
@@ -426,6 +514,120 @@ function App() {
   // Helper: does any layer in this binding have an error?
   const bindingHasError = (b) =>
     b.layers.some(l => errorMap[`${l.id}:${b.matchName}`]);
+
+  // Push the previous workbench onto history whenever workbench mutates,
+  // unless the change was triggered by undo/redo itself.
+  useEffect(() => {
+    if (skipHistoryRef.current) {
+      skipHistoryRef.current = false;
+      prevWorkbenchRef.current = workbench;
+      return;
+    }
+    const prev = prevWorkbenchRef.current;
+    if (JSON.stringify(prev) === JSON.stringify(workbench)) return;
+    setHistoryPast((p) => {
+      const next = [...p, prev];
+      if (next.length > HISTORY_LIMIT) next.shift();
+      return next;
+    });
+    setHistoryFuture([]);
+    prevWorkbenchRef.current = workbench;
+  }, [workbench]);
+
+  const undo = () => {
+    setHistoryPast((past) => {
+      if (past.length === 0) return past;
+      const prev = past[past.length - 1];
+      skipHistoryRef.current = true;
+      setHistoryFuture((f) => [...f, workbenchRef.current]);
+      setWorkbench(prev);
+      return past.slice(0, -1);
+    });
+  };
+
+  const redo = () => {
+    setHistoryFuture((future) => {
+      if (future.length === 0) return future;
+      const next = future[future.length - 1];
+      skipHistoryRef.current = true;
+      setHistoryPast((p) => {
+        const out = [...p, workbenchRef.current];
+        if (out.length > HISTORY_LIMIT) out.shift();
+        return out;
+      });
+      setWorkbench(next);
+      return future.slice(0, -1);
+    });
+  };
+
+  // Force-flush the autosave instead of waiting for the 500ms debounce.
+  const forceSave = async () => {
+    if (!bootedRef.current) return;
+    if (workbenchSnapshot === lastSavedSnapshot) {
+      setStatus("Already saved.");
+      return;
+    }
+    try {
+      const res = await evalScript('saveWorkbenchState', { json: workbenchSnapshot });
+      if (res.success) {
+        setLastSavedSnapshot(workbenchSnapshot);
+        setStatus("Saved to XMP.");
+      } else {
+        setStatus(`Error saving: ${res.message}`);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // UI-scoped keyboard shortcuts. Skipped when focus is inside Monaco (owns
+  // Ctrl+Z for its buffer), when a modal is open, or when the user is typing
+  // in any input/textarea — except Ctrl+S/L/K/, which are global on purpose.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const ae = document.activeElement;
+      const inMonaco = !!(ae && ae.closest && ae.closest('.monaco-editor'));
+      const inFormField = !!(ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable));
+      const anyModalOpen = libraryOpen || settingsOpen || llmOpen || historyOpen || scanGroups || mergeOpen || isLayersModalOpen;
+      const key = e.key.toLowerCase();
+
+      // Globally available — even from inside Monaco
+      if (key === 's') {
+        e.preventDefault();
+        forceSave();
+        return;
+      }
+      if (key === 'l' && !anyModalOpen) {
+        e.preventDefault();
+        setLibraryOpen(true);
+        return;
+      }
+      if (key === 'k' && !anyModalOpen) {
+        e.preventDefault();
+        setLlmOpen(true);
+        return;
+      }
+      if (e.key === ',' && !anyModalOpen) {
+        e.preventDefault();
+        setSettingsOpen(true);
+        return;
+      }
+
+      // Workbench undo/redo — scoped to UI focus
+      if (inMonaco || anyModalOpen || inFormField) return;
+      if (key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      } else if (key === 'y' || (key === 'z' && e.shiftKey)) {
+        e.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [libraryOpen, settingsOpen, llmOpen, historyOpen, scanGroups, mergeOpen, isLayersModalOpen, historyPast, historyFuture, workbenchSnapshot, lastSavedSnapshot]);
 
   // Process the auto-name queue one entry at a time. The effect re-runs each
   // time the queue mutates; we always work the first ID, then dequeue —
@@ -732,7 +934,14 @@ function App() {
           </span>
           <span className={`comp-name ${activeComp.id ? '' : 'empty'}`}>{activeComp.name}</span>
         </div>
-        <div className={`status-pill ${statusLevel}`} title={status}>{status}</div>
+        <div
+          className={`status-pill ${statusLevel}`}
+          title={status}
+          role="status"
+          aria-live="polite"
+        >
+          {status}
+        </div>
         <button
           className="icon-btn topbar-gear"
           onClick={() => setSettingsOpen(true)}
@@ -761,9 +970,18 @@ function App() {
 
           <div className="editor-header-actions">
             {selectedBindingId && activeBindingData && (
-              <button className="pill-btn" onClick={() => setIsLayersModalOpen(true)}>
-                {activeBindingData.layers.length} layer{activeBindingData.layers.length === 1 ? '' : 's'}
-              </button>
+              <>
+                <button className="pill-btn" onClick={() => setIsLayersModalOpen(true)}>
+                  {activeBindingData.layers.length} layer{activeBindingData.layers.length === 1 ? '' : 's'}
+                </button>
+                <button
+                  className="pill-btn"
+                  onClick={() => setHistoryOpen(true)}
+                  title="View previous expression versions"
+                >
+                  ⌚ {(activeBindingData.versions || []).length}
+                </button>
+              </>
             )}
             <button
               className="pill-btn ai-btn"
@@ -831,6 +1049,24 @@ function App() {
             <span className="chevron">▾</span>
             <span>Workbench</span>
             <span className="count-badge">{activeBindings.length}</span>
+          </button>
+          <button
+            className="pill-btn history-btn"
+            onClick={undo}
+            disabled={historyPast.length === 0}
+            title={`Undo (Ctrl+Z) · ${historyPast.length} step${historyPast.length === 1 ? '' : 's'}`}
+            aria-label="Undo"
+          >
+            ↶
+          </button>
+          <button
+            className="pill-btn history-btn"
+            onClick={redo}
+            disabled={historyFuture.length === 0}
+            title={`Redo (Ctrl+Y) · ${historyFuture.length} step${historyFuture.length === 1 ? '' : 's'}`}
+            aria-label="Redo"
+          >
+            ↷
           </button>
           <button
             className="pill-btn scan-btn"
@@ -927,6 +1163,13 @@ function App() {
         }}
         onInsert={insertSnippetIntoEditor}
         onReplace={(text) => setExpression(text)}
+      />
+
+      <VersionHistory
+        open={historyOpen}
+        binding={activeBindingData}
+        onClose={() => setHistoryOpen(false)}
+        onRestore={handleRestoreVersion}
       />
 
       {scanGroups && (

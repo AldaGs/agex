@@ -4,6 +4,8 @@ import {
   saveUserSnippet,
   deleteUserSnippet,
   factoryResetAll,
+  exportLibraryBundle,
+  importLibraryBundle,
   slugify,
 } from './vault';
 
@@ -139,6 +141,28 @@ export default function Library({ open, onClose, onInsert }) {
     }
   };
 
+  const handleExport = async () => {
+    try {
+      const res = await exportLibraryBundle();
+      if (res.cancelled) return;
+      window.alert(`Exported ${res.count} user snippet(s) to:\n${res.path}`);
+    } catch (e) {
+      setSaveError(e.message || 'Export failed.');
+    }
+  };
+
+  const handleImport = async () => {
+    try {
+      const res = await importLibraryBundle();
+      if (res.cancelled) return;
+      await refresh();
+      const skippedMsg = res.skipped ? ` (skipped ${res.skipped} malformed)` : '';
+      window.alert(`Imported ${res.imported} snippet(s)${skippedMsg}.`);
+    } catch (e) {
+      setSaveError(e.message || 'Import failed.');
+    }
+  };
+
   const handleFactoryReset = async () => {
     const ok = window.confirm(
       'Factory Reset will permanently delete every user snippet and config file under AG-Extensions/agex/. Built-in snippets will be restored to defaults.\n\nProceed?'
@@ -171,7 +195,7 @@ export default function Library({ open, onClose, onInsert }) {
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal library-modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal library-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Library">
         <div className="modal-header">
           <h2 className="modal-title">
             {mode === 'edit' ? (draft.id ? 'Edit snippet' : 'New snippet') : 'Library'}
@@ -274,9 +298,13 @@ export default function Library({ open, onClose, onInsert }) {
 
             <div className="lib-footer">
               <span className="lib-footer-count">{snippets.length} snippet{snippets.length === 1 ? '' : 's'}</span>
-              <button className="link-action danger-link" onClick={handleFactoryReset}>
-                Factory Reset
-              </button>
+              <div className="lib-footer-actions">
+                <button className="link-action" onClick={handleImport}>Import…</button>
+                <button className="link-action" onClick={handleExport}>Export…</button>
+                <button className="link-action danger-link" onClick={handleFactoryReset}>
+                  Factory Reset
+                </button>
+              </div>
             </div>
           </>
         ) : (

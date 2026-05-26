@@ -76,6 +76,62 @@ export async function forkBuiltin(builtin, overrides = {}) {
   return saveUserSnippet(fork);
 }
 
+// Export every user snippet to a JSON bundle file chosen by the OS dialog.
+// Returns { cancelled, path, count } so the UI can show meaningful feedback.
+export async function exportLibraryBundle() {
+  const all = await loadAllSnippets();
+  const userSnippets = all.filter((s) => s.source !== 'builtin');
+  const bundle = {
+    kind: 'agex-library-bundle',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    snippets: userSnippets,
+  };
+  const raw = JSON.stringify(bundle, null, 2);
+  const res = await evalScript('exportBundle', { raw });
+  if (!res.success) throw new Error(res.message || 'Export failed.');
+  return { cancelled: !!res.cancelled, path: res.path, count: userSnippets.length };
+}
+
+// Import snippets from a chosen bundle file. Collision rule: incoming
+// snippets whose id already exists get suffixed with -imported (and a
+// numeric counter on further collisions). Returns { cancelled, imported, skipped }.
+export async function importLibraryBundle() {
+  const res = await evalScript('importBundle');
+  if (!res.success) throw new Error(res.message || 'Import failed.');
+  if (res.cancelled) return { cancelled: true, imported: 0, skipped: 0 };
+
+  let bundle;
+  try { bundle = JSON.parse(res.raw); }
+  catch (_) { throw new Error('Selected file is not valid JSON.'); }
+
+  const incoming = Array.isArray(bundle?.snippets)
+    ? bundle.snippets
+    : (Array.isArray(bundle) ? bundle : null);
+  if (!incoming) throw new Error('No "snippets" array found in the bundle.');
+
+  const existing = await loadAllSnippets();
+  const existingIds = new Set(existing.map((s) => s.id));
+  let imported = 0;
+  let skipped = 0;
+
+  for (const s of incoming) {
+    if (!s?.id || !s?.name || typeof s.body !== 'string') { skipped++; continue; }
+    let id = s.id;
+    if (existingIds.has(id)) {
+      let candidate = `${s.id}-imported`;
+      let n = 2;
+      while (existingIds.has(candidate)) candidate = `${s.id}-imported-${n++}`;
+      id = candidate;
+    }
+    existingIds.add(id);
+    await saveUserSnippet({ ...s, id });
+    imported++;
+  }
+
+  return { cancelled: false, imported, skipped };
+}
+
 // Slugify a user-provided name into a filesystem-safe id.
 export function slugify(name) {
   return String(name)

@@ -70,7 +70,7 @@ export default function LLMDialog({
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal llm-modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal llm-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Ask Agent">
         <div className="modal-header">
           <h2 className="modal-title">
             <Bot size={16} style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
