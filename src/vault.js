@@ -132,6 +132,85 @@ export async function importLibraryBundle() {
   return { cancelled: false, imported, skipped };
 }
 
+/**
+ * Parse leading `let X = Y;` declarations from a snippet body. Stops at the
+ * first line that isn't blank or a `let` statement, so the convention is
+ * enforced naturally — params live at the top, code below.
+ *
+ * Returns an array of { name, raw, value, type, lineIndex, indent, quote? }.
+ * Type is one of "number" | "boolean" | "string" | "expression".
+ * "expression" is the fallback for anything we can't safely round-trip
+ * (e.g. `let foo = thisLayer.transform.position;`) — we'll show a read-only
+ * text input rather than risk corrupting code.
+ */
+export function parseSnippetParams(body) {
+  if (!body) return [];
+  const lines = body.split('\n');
+  const params = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*$/.test(line)) continue; // allow blank lines at top
+    const m = /^(\s*)let\s+(\w+)\s*=\s*(.+?)\s*;\s*$/.exec(line);
+    if (!m) break;
+    const [, indent, name, raw] = m;
+
+    if (/^-?\d+(\.\d+)?$/.test(raw)) {
+      params.push({ name, raw, value: Number(raw), type: 'number', lineIndex: i, indent });
+      continue;
+    }
+    if (raw === 'true' || raw === 'false') {
+      params.push({ name, raw, value: raw === 'true', type: 'boolean', lineIndex: i, indent });
+      continue;
+    }
+    const strMatch = /^(['"])(.*)\1$/.exec(raw);
+    if (strMatch) {
+      params.push({
+        name,
+        raw,
+        value: strMatch[2],
+        type: 'string',
+        quote: strMatch[1],
+        lineIndex: i,
+        indent,
+      });
+      continue;
+    }
+    // Couldn't safely parse — treat as opaque expression we won't touch.
+    params.push({ name, raw, value: raw, type: 'expression', lineIndex: i, indent });
+  }
+  return params;
+}
+
+/**
+ * Rewrite a snippet body with new values for any params. Only the parsed
+ * `let` lines change; everything else (including comments and code below)
+ * is preserved verbatim. Unknown / opaque params are passed through.
+ */
+export function applyParamsToBody(body, params, values) {
+  if (!params || !params.length) return body;
+  const lines = body.split('\n');
+  for (const p of params) {
+    if (!(p.name in values)) continue;
+    const v = values[p.name];
+    let serialized;
+    if (p.type === 'number') {
+      const n = Number(v);
+      serialized = Number.isFinite(n) ? String(n) : String(v);
+    } else if (p.type === 'boolean') {
+      serialized = v ? 'true' : 'false';
+    } else if (p.type === 'string') {
+      const quote = p.quote || '"';
+      const re = new RegExp(quote === '"' ? '"' : "'", 'g');
+      const escaped = String(v).replace(/\\/g, '\\\\').replace(re, `\\${quote}`);
+      serialized = `${quote}${escaped}${quote}`;
+    } else {
+      serialized = String(v);
+    }
+    lines[p.lineIndex] = `${p.indent || ''}let ${p.name} = ${serialized};`;
+  }
+  return lines.join('\n');
+}
+
 // Slugify a user-provided name into a filesystem-safe id.
 export function slugify(name) {
   return String(name)

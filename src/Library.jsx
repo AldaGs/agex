@@ -6,6 +6,8 @@ import {
   factoryResetAll,
   exportLibraryBundle,
   importLibraryBundle,
+  parseSnippetParams,
+  applyParamsToBody,
   slugify,
 } from './vault';
 
@@ -29,6 +31,10 @@ export default function Library({ open, onClose, onInsert }) {
   const [mode, setMode] = useState('browse');
   const [draft, setDraft] = useState(EMPTY_DRAFT);
   const [saveError, setSaveError] = useState('');
+
+  // Per-snippet param overrides, keyed by snippet id. Persists while the
+  // library is open so users can tweak, collapse, expand again, and continue.
+  const [paramValues, setParamValues] = useState({});
 
   const refresh = async () => {
     setLoading(true);
@@ -259,37 +265,114 @@ export default function Library({ open, onClose, onInsert }) {
                         </span>
                       </button>
 
-                      {isOpen && (
-                        <div className="lib-row-body">
-                          {s.description && <div className="lib-desc">{s.description}</div>}
-                          <pre className="lib-code">{s.body}</pre>
-                          <div className="lib-actions">
-                            {isBuiltin ? (
-                              <button className="btn-secondary" onClick={() => beginFork(s)}>
-                                Fork & Edit
-                              </button>
-                            ) : (
-                              <>
-                                <button className="btn-secondary" onClick={() => beginEdit(s)}>
-                                  Edit
-                                </button>
-                                <button
-                                  className="btn-secondary danger"
-                                  onClick={() => handleDelete(s)}
-                                >
-                                  Delete
-                                </button>
-                              </>
+                      {isOpen && (() => {
+                        const params = parseSnippetParams(s.body);
+                        const overrides = paramValues[s.id] || {};
+                        const effectiveBody = params.length
+                          ? applyParamsToBody(s.body, params, overrides)
+                          : s.body;
+                        const setParam = (name, v) =>
+                          setParamValues((prev) => ({
+                            ...prev,
+                            [s.id]: { ...(prev[s.id] || {}), [name]: v },
+                          }));
+                        const resetParams = () =>
+                          setParamValues((prev) => {
+                            const next = { ...prev };
+                            delete next[s.id];
+                            return next;
+                          });
+                        const isCustomized = Object.keys(overrides).length > 0;
+
+                        return (
+                          <div className="lib-row-body">
+                            {s.description && <div className="lib-desc">{s.description}</div>}
+
+                            {params.length > 0 && (
+                              <div className="param-form">
+                                <div className="param-form-head">
+                                  <span className="lib-field-label">Parameters</span>
+                                  {isCustomized && (
+                                    <button className="link-action" onClick={resetParams}>
+                                      Reset
+                                    </button>
+                                  )}
+                                </div>
+                                <div className="param-grid">
+                                  {params.map((p) => {
+                                    const current = overrides[p.name] !== undefined
+                                      ? overrides[p.name]
+                                      : p.value;
+                                    return (
+                                      <label key={p.name} className="param-field">
+                                        <span className="param-name">{p.name}</span>
+                                        {p.type === 'number' ? (
+                                          <input
+                                            type="number"
+                                            step="any"
+                                            value={current}
+                                            onChange={(e) => setParam(p.name, e.target.value === '' ? '' : Number(e.target.value))}
+                                          />
+                                        ) : p.type === 'boolean' ? (
+                                          <label className="param-checkbox">
+                                            <input
+                                              type="checkbox"
+                                              checked={!!current}
+                                              onChange={(e) => setParam(p.name, e.target.checked)}
+                                            />
+                                            <span>{current ? 'true' : 'false'}</span>
+                                          </label>
+                                        ) : p.type === 'string' ? (
+                                          <input
+                                            type="text"
+                                            value={current}
+                                            onChange={(e) => setParam(p.name, e.target.value)}
+                                          />
+                                        ) : (
+                                          <input
+                                            type="text"
+                                            value={current}
+                                            readOnly
+                                            className="param-readonly"
+                                            title="Complex expression — edit the body directly via Fork & Edit"
+                                          />
+                                        )}
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              </div>
                             )}
-                            <button
-                              className="btn-primary lib-insert-btn"
-                              onClick={() => { onInsert(s.body); onClose(); }}
-                            >
-                              Insert
-                            </button>
+
+                            <pre className="lib-code">{effectiveBody}</pre>
+                            <div className="lib-actions">
+                              {isBuiltin ? (
+                                <button className="btn-secondary" onClick={() => beginFork(s)}>
+                                  Fork & Edit
+                                </button>
+                              ) : (
+                                <>
+                                  <button className="btn-secondary" onClick={() => beginEdit(s)}>
+                                    Edit
+                                  </button>
+                                  <button
+                                    className="btn-secondary danger"
+                                    onClick={() => handleDelete(s)}
+                                  >
+                                    Delete
+                                  </button>
+                                </>
+                              )}
+                              <button
+                                className="btn-primary lib-insert-btn"
+                                onClick={() => { onInsert(effectiveBody); onClose(); }}
+                              >
+                                Insert
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        );
+                      })()}
                     </div>
                   );
                 })
